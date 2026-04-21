@@ -141,7 +141,7 @@ Be concise and data-driven."""
                 response = requests.post(
                     f"{ollama_url}/api/generate",
                     json={
-                        'model': 'llama3:8b',
+                        'model': getattr(settings, 'OLLAMA_MODEL', 'llama3:8b'),
                         'prompt': prompt,
                         'stream': False
                     },
@@ -436,7 +436,7 @@ Provide 1-2 sentence trading recommendation. Be concise."""
         ollama_url = getattr(settings, 'OLLAMA_BASE_URL', 'http://localhost:11434')
         response = requests.post(
             f"{ollama_url}/api/generate",
-            json={'model': 'llama3:8b', 'prompt': prompt, 'stream': False},
+            json={'model': getattr(settings, 'OLLAMA_MODEL', 'llama3:8b'), 'prompt': prompt, 'stream': False},
             timeout=60
         )
         response.raise_for_status()
@@ -532,7 +532,7 @@ Be concise and data-driven."""
         ollama_url = getattr(settings, 'OLLAMA_BASE_URL', 'http://localhost:11434')
         response = requests.post(
             f"{ollama_url}/api/generate",
-            json={'model': 'llama3:8b', 'prompt': prompt, 'stream': False},
+            json={'model': getattr(settings, 'OLLAMA_MODEL', 'llama3:8b'), 'prompt': prompt, 'stream': False},
             timeout=60
         )
         response.raise_for_status()

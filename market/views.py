@@ -970,7 +970,7 @@ Keep your response under 200 words."""
         response = requests.post(
             f"{ollama_url}/api/generate",
             json={
-                'model': 'llama3:8b',
+                'model': getattr(settings, 'OLLAMA_MODEL', 'llama3:8b'),
                 'prompt': prompt,
                 'stream': False
             },
