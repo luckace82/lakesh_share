@@ -15,8 +15,28 @@ Including another URLconf
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
 from django.contrib import admin
-from django.urls import path
+from django.urls import path, include
+from django.http import JsonResponse
+
+def api_root(request):
+    return JsonResponse({
+        'message': 'Lakesh Share API',
+        'endpoints': {
+            'api': '/api/',
+            'admin': '/admin/',
+            'auth': '/api/auth/',
+            'stocks': '/api/stocks/',
+            'watchlist': '/api/watchlist/',
+            'portfolio': '/api/portfolio/',
+            'screener': '/api/screener/',
+            'ai': '/api/ai/analyze/',
+            'nepse_index': '/api/nepse-index/',
+            'market_stats': '/api/market-stats/'
+        }
+    })
 
 urlpatterns = [
+    path('', api_root, name='api-root'),
     path('admin/', admin.site.urls),
+    path('api/', include('market.urls')),
 ]

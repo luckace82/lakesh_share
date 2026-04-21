@@ -1,5 +1,6 @@
 Django
 djangorestframework
+djangorestframework-simplejwt
 django-cors-headers
 
 celery==5.3.4
@@ -10,3 +11,6 @@ beautifulsoup4
 lxml
 pandas
 python-decouple
+selenium
+webdriver-manager
+psycopg2-binary

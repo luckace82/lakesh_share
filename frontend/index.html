@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Ontreat NEPSE</title>
+    <script>
+      (function() {
+        try {
+          const isDark = localStorage.getItem('nepse-dark-mode') !== 'false';
+          if (isDark) {
+            document.documentElement.classList.add('dark');
+            document.body.style.background = '#0f172a';
+            document.body.style.color = '#f1f5f9';
+          } else {
+            document.documentElement.classList.remove('dark');
+            document.body.style.background = '#ffffff';
+            document.body.style.color = '#1e293b';
+          }
+        } catch (e) {
+          document.documentElement.classList.add('dark');
+          document.body.style.background = '#0f172a';
+          document.body.style.color = '#f1f5f9';
+        }
+      })();
+    </script>
+  </head>
+  <body style="margin:0">
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
