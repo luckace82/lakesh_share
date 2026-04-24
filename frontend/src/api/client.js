@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const API_BASE = 'http://192.168.1.14:8000/api';
+const API_BASE = 'http://192.168.1.93:8000/api';
 
 const api = axios.create({
   baseURL: API_BASE,
