@@ -10,6 +10,7 @@ import PortfolioPage from './pages/Portfolio';
 import Screener from './pages/Screener';
 import Watchlist from './pages/Watchlist';
 import AllStocks from './pages/AllStocks';
+import Chat from './pages/Chat';
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth();
@@ -39,6 +40,7 @@ function AppRoutes() {
               <Route path="/watchlist" element={<Watchlist />} />
               <Route path="/portfolio" element={<PortfolioPage />} />
               <Route path="/screener" element={<Screener />} />
+              <Route path="/chat" element={<Chat />} />
               <Route path="/stocks/all" element={<AllStocks />} />
               <Route path="/stocks/:symbol" element={<StockDetail />} />
               <Route path="/" element={<Navigate to="/dashboard" />} />

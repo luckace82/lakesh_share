@@ -145,7 +145,7 @@ Be concise and data-driven."""
                         'prompt': prompt,
                         'stream': False
                     },
-                    timeout=60
+                    timeout=180
                 )
                 response.raise_for_status()
                 ai_response = response.json().get('response', '')
@@ -437,7 +437,7 @@ Provide 1-2 sentence trading recommendation. Be concise."""
         response = requests.post(
             f"{ollama_url}/api/generate",
             json={'model': getattr(settings, 'OLLAMA_MODEL', 'llama3:8b'), 'prompt': prompt, 'stream': False},
-            timeout=60
+            timeout=180
         )
         response.raise_for_status()
         insight_text = response.json().get('response', '')
@@ -533,7 +533,7 @@ Be concise and data-driven."""
         response = requests.post(
             f"{ollama_url}/api/generate",
             json={'model': getattr(settings, 'OLLAMA_MODEL', 'llama3:8b'), 'prompt': prompt, 'stream': False},
-            timeout=60
+            timeout=180
         )
         response.raise_for_status()
         prediction_text = response.json().get('response', '')

@@ -3,7 +3,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from django.core.cache import cache
 import logging
-from .vector_search import stock_search
+from .vector_search import StockVectorSearch
 from .scraper_tasks import ai_screener_task
 import json
 
@@ -12,35 +12,68 @@ logger = logging.getLogger(__name__)
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def chat_query(request):
-    """Smart chat endpoint with vector search and on-demand data loading"""
+    """Smart chat endpoint with text-based stock search and on-demand data loading"""
     try:
         query = request.data.get('query', '').strip()
         if not query:
             return Response({'error': 'Query is required'}, status=400)
         
-        # Step 1: Find relevant stocks using vector search
-        relevant_stocks = stock_search.search_stocks(query, top_k=10)
+        # Step 1: Find relevant stocks using simple text search
+        from .models import Stock, DailyPrice
+        from django.utils import timezone
+        from datetime import timedelta
         
-        # Step 2: Load detailed data only for relevant stocks
-        detailed_stocks = []
-        for stock_info in relevant_stocks:
-            symbol = stock_info['symbol']
-            detailed_data = stock_search.get_stock_details(symbol, days=30)
-            if detailed_data:
-                detailed_stocks.append({
-                    **detailed_data,
-                    'similarity': stock_info['similarity']
+        relevant_stocks = []
+        stocks = Stock.objects.filter(is_active=True)
+        
+        # Simple text matching for now (can be enhanced with vector search later)
+        query_lower = query.lower()
+        for stock in stocks:
+            match_score = 0
+            if query_lower in stock.symbol.lower():
+                match_score += 10
+            if query_lower in stock.name.lower():
+                match_score += 5
+            if stock.sector and query_lower in stock.sector.lower():
+                match_score += 3
+            
+            if match_score > 0:
+                # Get latest price data
+                latest_price = stock.live_prices.first()
+                relevant_stocks.append({
+                    'symbol': stock.symbol,
+                    'name': stock.name,
+                    'sector': stock.sector,
+                    'similarity': match_score / 10.0,  # Normalize to 0-1
+                    'live_price': {
+                        'ltp': float(latest_price.ltp) if latest_price else None,
+                        'change': float(latest_price.change) if latest_price else 0,
+                        'change_percent': float(latest_price.change_percent) if latest_price else 0
+                    } if latest_price else None,
+                    'indicators': {
+                        'rsi_14': stock.rsi_14,
+                        'ma_20': stock.ma_20,
+                        'ma_50': stock.ma_50,
+                        'price_change_pct_7d': stock.price_change_pct_7d,
+                        'price_change_pct_30d': stock.price_change_pct_30d
+                    }
                 })
         
-        # Step 3: Build context for AI
-        context = build_ai_context(detailed_stocks, query)
+        # Sort by similarity
+        relevant_stocks.sort(key=lambda x: x['similarity'], reverse=True)
+        relevant_stocks = relevant_stocks[:10]  # Top 10 results
         
-        # Step 4: Get AI response
+        logger.info(f"Found {len(relevant_stocks)} relevant stocks for query: {query}")
+        
+        # Step 2: Build context for AI using the already fetched data
+        context = build_ai_context(relevant_stocks, query)
+        
+        # Step 3: Get AI response
         ai_response = get_ai_response(query, context)
         
         return Response({
             'query': query,
-            'relevant_stocks': detailed_stocks,
+            'relevant_stocks': relevant_stocks,
             'ai_response': ai_response,
             'context_used': context
         })
@@ -111,7 +144,7 @@ Be conversational and informative. Include specific numbers and percentages when
                 'prompt': prompt,
                 'stream': False
             },
-            timeout=60
+            timeout=180
         )
         response.raise_for_status()
         return response.json().get('response', 'Sorry, I could not process your request.')
@@ -123,20 +156,88 @@ Be conversational and informative. Include specific numbers and percentages when
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def stock_search(request):
-    """Simple stock search using vector similarity"""
+    """Simple stock search using text similarity"""
     query = request.data.get('query', '').strip()
     if not query:
         return Response({'error': 'Query is required'}, status=400)
     
-    results = stock_search.search_stocks(query, top_k=10)
+    # Use simple text search for now
+    from .models import Stock
+    
+    results = []
+    stocks = Stock.objects.filter(is_active=True)
+    query_lower = query.lower()
+    
+    for stock in stocks:
+        match_score = 0
+        if query_lower in stock.symbol.lower():
+            match_score += 10
+        if query_lower in stock.name.lower():
+            match_score += 5
+        if stock.sector and query_lower in stock.sector.lower():
+            match_score += 3
+        
+        if match_score > 0:
+            results.append({
+                'symbol': stock.symbol,
+                'name': stock.name,
+                'sector': stock.sector,
+                'similarity': match_score / 10.0
+            })
+    
+    # Sort by similarity
+    results.sort(key=lambda x: x['similarity'], reverse=True)
+    results = results[:10]  # Top 10 results
+    
     return Response({'results': results})
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def stock_details(request, symbol):
     """Get detailed stock data on-demand"""
-    details = stock_search.get_stock_details(symbol, days=30)
-    if not details:
+    try:
+        from .models import Stock, DailyPrice
+        from django.utils import timezone
+        from datetime import timedelta
+        
+        stock = Stock.objects.get(symbol=symbol.upper())
+        
+        # Get recent prices
+        cutoff = timezone.now().date() - timedelta(days=30)
+        daily_prices = stock.daily_prices.filter(
+            date__gte=cutoff
+        ).order_by('date').values('date', 'open', 'high', 'low', 'close', 'volume')
+        
+        # Get live price
+        live_price = stock.live_prices.first()
+        
+        details = {
+            'symbol': stock.symbol,
+            'name': stock.name,
+            'sector': stock.sector,
+            'live_price': {
+                'ltp': float(live_price.ltp),
+                'change': float(live_price.change),
+                'change_percent': float(live_price.change_percent),
+                'volume': int(live_price.volume),
+                'high': float(live_price.high),
+                'low': float(live_price.low),
+                'timestamp': live_price.timestamp.isoformat()
+            } if live_price else None,
+            'indicators': {
+                'rsi_14': stock.rsi_14,
+                'ma_20': stock.ma_20,
+                'ma_50': stock.ma_50,
+                'price_change_pct_7d': stock.price_change_pct_7d,
+                'price_change_pct_30d': stock.price_change_pct_30d
+            },
+            'daily_prices': list(daily_prices)
+        }
+        
+        return Response(details)
+        
+    except Stock.DoesNotExist:
         return Response({'error': 'Stock not found'}, status=404)
-    
-    return Response(details)
+    except Exception as e:
+        logger.error(f"Error getting stock details: {e}")
+        return Response({'error': 'Failed to get stock details'}, status=500)
