@@ -145,7 +145,7 @@ Be concise and data-driven."""
                         'prompt': prompt,
                         'stream': False
                     },
-                    timeout=60
+                    timeout=180
                 )
                 response.raise_for_status()
                 ai_response = response.json().get('response', '')
@@ -437,7 +437,7 @@ Provide 1-2 sentence trading recommendation. Be concise."""
         response = requests.post(
             f"{ollama_url}/api/generate",
             json={'model': getattr(settings, 'OLLAMA_MODEL', 'llama3:8b'), 'prompt': prompt, 'stream': False},
-            timeout=60
+            timeout=180
         )
         response.raise_for_status()
         insight_text = response.json().get('response', '')
@@ -533,7 +533,7 @@ Be concise and data-driven."""
         response = requests.post(
             f"{ollama_url}/api/generate",
             json={'model': getattr(settings, 'OLLAMA_MODEL', 'llama3:8b'), 'prompt': prompt, 'stream': False},
-            timeout=60
+            timeout=180
         )
         response.raise_for_status()
         prediction_text = response.json().get('response', '')
@@ -567,10 +567,9 @@ Be concise and data-driven."""
         logger.info(f"Generated NEPSE 7-day prediction with {len(predictions_data.get('predictions', []))} days")
         return {
             'success': True,
-            'predictions': predictions_data.get('predictions', []),
-            'reasoning': prediction_text
+            'predictions_count': len(predictions_data.get('predictions', []))
         }
-
+        
     except Exception as e:
         logger.error(f"Error generating NEPSE prediction: {e}")
         return {'success': False, 'error': str(e)}
@@ -928,3 +927,163 @@ def _clean_int(value):
         return int(float(value.replace(',', '').replace(' ', '').strip()))
     except Exception:
         return 0
+
+
+# Automatic NEPSE Index Scraping Tasks
+# -----------------------------------------
+
+@shared_task(bind=True)
+def auto_scrape_nepse_index(self):
+    """
+    Automatically scrape NEPSE index data daily.
+    This task is scheduled to run at 4:30 PM daily.
+    """
+    from .nepse_scraper import scrape_nepse_index
+    from .models import NEPSEIndex
+    from django.utils import timezone
+    import logging
+    
+    logger = logging.getLogger(__name__)
+    
+    try:
+        # Get today's date
+        today = timezone.now().date()
+        
+        # Check if we already have data for today
+        existing_today = NEPSEIndex.objects.filter(date=today).exists()
+        if existing_today:
+            logger.info(f"NEPSE index data already exists for {today}, skipping scrape")
+            return {'status': 'skipped', 'reason': 'Data already exists for today'}
+        
+        # Scrape current NEPSE index
+        index_data = scrape_nepse_index()
+        
+        if index_data:
+            # Save to database
+            nepse_index = NEPSEIndex(
+                date=today,
+                value=index_data['value'],
+                change=index_data.get('change', 0),
+                change_percent=index_data.get('change_percent', 0),
+                timestamp=index_data['timestamp']
+            )
+            nepse_index.save()
+            
+            logger.info(f"Auto-scraped NEPSE index: {index_data['value']} for {today}")
+            return {
+                'status': 'success',
+                'value': index_data['value'],
+                'date': str(today),
+                'change': index_data.get('change', 0),
+                'change_percent': index_data.get('change_percent', 0)
+            }
+        else:
+            logger.error("Failed to scrape NEPSE index data")
+            return {'status': 'failed', 'reason': 'Scraper returned no data'}
+            
+    except Exception as e:
+        logger.error(f"Auto NEPSE index scraping failed: {e}")
+        return {'status': 'failed', 'reason': str(e)}
+
+
+@shared_task(bind=True)
+def update_stock_indicators(self):
+    """
+    Update technical indicators for all stocks after market close.
+    This task runs at 5:00 PM daily.
+    """
+    from .models import Stock, DailyPrice
+    from django.utils import timezone
+    import logging
+    import pandas as pd
+    
+    logger = logging.getLogger(__name__)
+    
+    try:
+        updated_count = 0
+        stocks = Stock.objects.filter(is_active=True, daily_prices__isnull=False).distinct()
+        
+        for stock in stocks:
+            try:
+                # Get last 50 days of price data for indicator calculations
+                prices = stock.daily_prices.order_by('-date')[:50]
+                if len(prices) < 14:  # Need at least 14 days for RSI
+                    continue
+                
+                # Convert to DataFrame
+                df = pd.DataFrame(list(prices.values('date', 'close', 'volume')))
+                df = df.sort_values('date')
+                
+                # Calculate RSI (14-day)
+                if len(df) >= 14:
+                    delta = df['close'].diff()
+                    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+                    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+                    rs = gain / loss
+                    rsi = 100 - (100 / (1 + rs))
+                    stock.rsi_14 = rsi.iloc[-1] if not rsi.empty else None
+                
+                # Calculate Moving Averages
+                if len(df) >= 50:
+                    stock.ma_20 = df['close'].rolling(window=20).mean().iloc[-1]
+                    stock.ma_50 = df['close'].rolling(window=50).mean().iloc[-1]
+                elif len(df) >= 20:
+                    stock.ma_20 = df['close'].rolling(window=20).mean().iloc[-1]
+                
+                # Calculate price changes
+                if len(df) >= 30:
+                    price_30d_ago = df['close'].iloc[-30]
+                    price_7d_ago = df['close'].iloc[-7] if len(df) >= 7 else df['close'].iloc[0]
+                    current_price = df['close'].iloc[-1]
+                    
+                    stock.price_change_pct_30d = ((current_price - price_30d_ago) / price_30d_ago) * 100
+                    stock.price_change_pct_7d = ((current_price - price_7d_ago) / price_7d_ago) * 100
+                
+                # Calculate average volume
+                if len(df) >= 30:
+                    stock.volume_avg_30d = df['volume'].tail(30).mean()
+                
+                stock.indicators_updated = timezone.now()
+                stock.save()
+                updated_count += 1
+                
+            except Exception as e:
+                logger.warning(f"Failed to update indicators for {stock.symbol}: {e}")
+                continue
+        
+        logger.info(f"Updated technical indicators for {updated_count} stocks")
+        return {'status': 'success', 'updated_count': updated_count}
+        
+    except Exception as e:
+        logger.error(f"Stock indicators update failed: {e}")
+        return {'status': 'failed', 'reason': str(e)}
+
+
+@shared_task(bind=True)
+def generate_daily_insights(self):
+    """
+    Generate daily market insights and analysis.
+    This task runs at 5:15 PM daily.
+    """
+    from .models import NEPSEIndex, NEPSEInsight, Stock
+    from django.utils import timezone
+    import logging
+    
+    logger = logging.getLogger(__name__)
+    
+    try:
+        # Get recent NEPSE index data
+        recent_data = NEPSEIndex.objects.order_by('-date')[:30]
+        if len(recent_data) < 7:
+            return {'status': 'skipped', 'reason': 'Insufficient data for analysis'}
+        
+        # Generate insights using existing function
+        from .views import generate_nepse_insights
+        insights = generate_nepse_insights(None)
+        
+        logger.info("Generated daily NEPSE insights")
+        return {'status': 'success', 'insights_generated': len(insights.data) if hasattr(insights, 'data') else 0}
+        
+    except Exception as e:
+        logger.error(f"Daily insights generation failed: {e}")
+        return {'status': 'failed', 'reason': str(e)}

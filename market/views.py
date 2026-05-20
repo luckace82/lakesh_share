@@ -974,7 +974,7 @@ Keep your response under 200 words."""
                 'prompt': prompt,
                 'stream': False
             },
-            timeout=60
+            timeout=180
         )
         response.raise_for_status()
         return response.json().get('response', '')

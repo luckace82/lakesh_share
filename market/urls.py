@@ -2,6 +2,7 @@ from django.urls import path
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
 from . import views
+from . import chat_views
 
 urlpatterns = [
     # Auth
@@ -57,4 +58,9 @@ urlpatterns = [
     path('nepse-index/predict/', views.generate_nepse_prediction, name='generate_nepse_prediction'),
     path('nepse-index/stats/', views.nepse_index_stats, name='nepse_index_stats'),
     path('market-stats/', views.market_stats, name='market_stats'),
+    
+    # Chat
+    path('chat/query/', chat_views.chat_query, name='chat-query'),
+    path('chat/search/', chat_views.stock_search, name='stock-search'),
+    path('chat/stock/<str:symbol>/', chat_views.stock_details, name='chat-stock-details'),
 ]

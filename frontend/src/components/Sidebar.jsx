@@ -10,6 +10,7 @@ import {
   BookOpen, 
   Layers,
   Bell,
+  MessageSquare,
   LogOut
 } from 'lucide-react';
 
@@ -22,6 +23,7 @@ export default function Sidebar() {
     { path: '/portfolio', icon: Briefcase, label: 'Portfolio' },
     { path: '/watchlist', icon: Star, label: 'Watchlist' },
     { path: '/screener', icon: Search, label: 'Screener' },
+    { path: '/chat', icon: MessageSquare, label: 'AI Chat' },
     { path: '/ipo', icon: FileText, label: 'IPO' },
     { path: '/floorsheet', icon: Layers, label: 'Floorsheet' },
     { path: '/market-depth', icon: TrendingUp, label: 'Market Depth' },

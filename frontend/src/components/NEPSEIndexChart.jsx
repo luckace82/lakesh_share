@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { RefreshCw, Loader2, TrendingUp, Database, Brain, Sparkles } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Area, AreaChart, ComposedChart, Bar } from 'recharts';
+import { RefreshCw, Loader2, TrendingUp, Database, Brain, Sparkles, Activity, Zap } from 'lucide-react';
 import { getNEPSEIndexData, scrapeNEPSEIndex, getNEPSEInsights, getNEPSEIndexStats, generateNEPSEInsights, getNEPSEPredictions, generateNEPSEPrediction } from '../api/client';
 
 const TIME_RANGES = ['1d', '3d', '1w', '1m', '3m', '6m', '1y', 'all'];
@@ -18,6 +18,9 @@ export default function NEPSEIndexChart() {
   const [scraping, setScraping] = useState(false);
   const [generatingInsights, setGeneratingInsights] = useState(false);
   const [generatingPrediction, setGeneratingPrediction] = useState(false);
+  const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
+  const [lastRefreshTime, setLastRefreshTime] = useState(null);
+  const intervalRef = useRef(null);
 
   const fetchData = async () => {
     setLoading(true);
@@ -29,8 +32,27 @@ export default function NEPSEIndexChart() {
         time: new Date(item.timestamp).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
         date: new Date(item.timestamp).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
         value: parseFloat(item.value),
-        volume: item.volume
+        volume: item.volume,
+        // Add moving averages for more complex visualization
+        ma5: null,
+        ma10: null,
+        change: 0
       }));
+
+      // Calculate moving averages
+      for (let i = 0; i < formattedData.length; i++) {
+        if (i >= 4) {
+          const ma5 = formattedData.slice(i - 4, i + 1).reduce((sum, item) => sum + item.value, 0) / 5;
+          formattedData[i].ma5 = ma5;
+        }
+        if (i >= 9) {
+          const ma10 = formattedData.slice(i - 9, i + 1).reduce((sum, item) => sum + item.value, 0) / 10;
+          formattedData[i].ma10 = ma10;
+        }
+        if (i > 0) {
+          formattedData[i].change = ((formattedData[i].value - formattedData[i - 1].value) / formattedData[i - 1].value) * 100;
+        }
+      }
 
       // If no data for 1d range, fetch latest data
       if (formattedData.length === 0 && timeRange === '1d') {
@@ -43,17 +65,43 @@ export default function NEPSEIndexChart() {
             time: new Date(latestItem.timestamp).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
             date: new Date(latestItem.timestamp).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
             value: parseFloat(latestItem.value),
-            volume: latestItem.volume
+            volume: latestItem.volume,
+            ma5: parseFloat(latestItem.value),
+            ma10: parseFloat(latestItem.value),
+            change: 0
           }];
         }
       }
 
       setData(formattedData);
+      setLastRefreshTime(new Date());
     } catch (error) {
       console.error('Error fetching NEPSE index data:', error);
     }
     setLoading(false);
   };
+
+  // Auto-refresh functionality
+  useEffect(() => {
+    if (autoRefreshEnabled) {
+      // Refresh every 5 minutes during market hours
+      const now = new Date();
+      const marketHours = now.getHours() >= 10 && now.getHours() <= 15; // 10 AM to 3 PM
+      
+      if (marketHours) {
+        intervalRef.current = setInterval(() => {
+          fetchData();
+          fetchStats();
+        }, 5 * 60 * 1000); // 5 minutes
+      }
+    }
+
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+      }
+    };
+  }, [autoRefreshEnabled, timeRange]);
 
   const fetchInsights = async () => {
     try {
@@ -187,17 +235,25 @@ export default function NEPSEIndexChart() {
     <div className="card mb-8">
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-3">
-          <TrendingUp className="h-5 w-5 text-[var(--color-brand)]" />
-          <div>
-            <h2 className="text-[18px] font-bold text-[var(--color-primary-text)]">NEPSE Index</h2>
-            <div className="flex items-center gap-2">
-              <p className="text-[var(--color-secondary-text)] text-sm">Market benchmark</p>
-              {stats && (
-                <div className="flex items-center gap-1 text-xs text-[var(--color-secondary-text)]">
-                  <Database className="h-3 w-3" />
-                  <span>{stats.total_records.toLocaleString()} records</span>
-                </div>
-              )}
+          <div className="flex items-center gap-2">
+            <TrendingUp className="h-6 w-6 text-[var(--color-brand)]" />
+            <div>
+              <h2 className="text-[20px] font-bold text-[var(--color-primary-text)]">NEPSE Index</h2>
+              <div className="flex items-center gap-3">
+                <p className="text-[var(--color-secondary-text)] text-sm">Market benchmark</p>
+                {stats && (
+                  <div className="flex items-center gap-1 text-xs text-[var(--color-secondary-text)]">
+                    <Database className="h-3 w-3" />
+                    <span>{stats.total_records.toLocaleString()} records</span>
+                  </div>
+                )}
+                {lastRefreshTime && (
+                  <div className="flex items-center gap-1 text-xs text-[var(--color-secondary-text)]">
+                    <Zap className="h-3 w-3" />
+                    <span>Last: {lastRefreshTime.toLocaleTimeString()}</span>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>
@@ -260,6 +316,20 @@ export default function NEPSEIndexChart() {
               {generatingPrediction ? 'Generating...' : 'Generate'}
             </button>
           )}
+          
+          {/* Auto-refresh toggle */}
+          <button
+            onClick={() => setAutoRefreshEnabled(!autoRefreshEnabled)}
+            className={`flex items-center gap-2 px-3 py-1.5 text-xs font-medium rounded border-0 cursor-pointer transition-colors ${
+              autoRefreshEnabled 
+                ? 'bg-green-500 text-white hover:bg-green-600' 
+                : 'bg-gray-500 text-white hover:bg-gray-600'
+            }`}
+            title={autoRefreshEnabled ? 'Auto-refresh enabled (5 min)' : 'Auto-refresh disabled'}
+          >
+            <Activity className="h-3.5 w-3.5" />
+            {autoRefreshEnabled ? 'Auto' : 'Manual'}
+          </button>
         </div>
       </div>
 
@@ -278,44 +348,142 @@ export default function NEPSEIndexChart() {
               </div>
 
               {loading ? (
-                <div className="flex items-center justify-center h-64">
-                  <Loader2 className="h-8 w-8 animate-spin text-[var(--color-brand)]" />
+                <div className="flex items-center justify-center h-96">
+                  <div className="text-center">
+                    <Loader2 className="h-12 w-12 animate-spin text-[var(--color-brand)] mx-auto mb-4" />
+                    <p className="text-[var(--color-secondary-text)]">Loading NEPSE Index data...</p>
+                  </div>
                 </div>
               ) : data.length > 0 ? (
-                <ResponsiveContainer width="100%" height={250}>
-                  <LineChart data={data}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
-                    <XAxis
-                      dataKey={timeRange === '1d' || timeRange === '3d' ? 'time' : 'date'}
-                      stroke="var(--color-secondary-text)"
-                      fontSize={12}
-                    />
-                    <YAxis
-                      stroke="var(--color-secondary-text)"
-                      fontSize={12}
-                      domain={['dataMin - 50', 'dataMax + 50']}
-                    />
-                    <Tooltip
-                      contentStyle={{
-                        backgroundColor: 'var(--color-card-bg)',
-                        border: '1px solid var(--color-border)',
-                        borderRadius: '8px',
-                        color: 'var(--color-primary-text)'
-                      }}
-                      labelStyle={{ color: 'var(--color-secondary-text)' }}
-                    />
-                    <Line
-                      type="monotone"
-                      dataKey="value"
-                      stroke={isPositive ? 'var(--color-gain)' : 'var(--color-loss)'}
-                      strokeWidth={2}
-                      dot={false}
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
+                <div className="space-y-4">
+                  {/* Main price chart with moving averages */}
+                  <ResponsiveContainer width="100%" height={400}>
+                    <ComposedChart data={data}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" opacity={0.3} />
+                      <XAxis
+                        dataKey={timeRange === '1d' || timeRange === '3d' ? 'time' : 'date'}
+                        stroke="var(--color-secondary-text)"
+                        fontSize={12}
+                        tick={{ fill: 'var(--color-secondary-text)' }}
+                      />
+                      <YAxis
+                        stroke="var(--color-secondary-text)"
+                        fontSize={12}
+                        domain={['dataMin - 100', 'dataMax + 100']}
+                        tick={{ fill: 'var(--color-secondary-text)' }}
+                      />
+                      <Tooltip
+                        contentStyle={{
+                          backgroundColor: 'var(--color-card-bg)',
+                          border: '1px solid var(--color-border)',
+                          borderRadius: '12px',
+                          color: 'var(--color-primary-text)',
+                          boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)'
+                        }}
+                        labelStyle={{ color: 'var(--color-secondary-text)', fontWeight: 'bold' }}
+                        formatter={(value, name) => {
+                          if (name === 'value') return [`NPR ${value.toLocaleString()}`, 'Index Value'];
+                          if (name === 'ma5') return [`NPR ${value?.toFixed(2)}`, '5-day MA'];
+                          if (name === 'ma10') return [`NPR ${value?.toFixed(2)}`, '10-day MA'];
+                          return [value, name];
+                        }}
+                      />
+                      
+                      {/* Area under the main line */}
+                      <Area
+                        type="monotone"
+                        dataKey="value"
+                        stroke={isPositive ? 'var(--color-gain)' : 'var(--color-loss)'}
+                        fill={isPositive ? 'var(--color-gain)' : 'var(--color-loss)'}
+                        fillOpacity={0.1}
+                        strokeWidth={3}
+                      />
+                      
+                      {/* Moving averages */}
+                      <Line
+                        type="monotone"
+                        dataKey="ma5"
+                        stroke="#3b82f6"
+                        strokeWidth={2}
+                        dot={false}
+                        strokeDasharray="5 5"
+                        name="5-day MA"
+                      />
+                      <Line
+                        type="monotone"
+                        dataKey="ma10"
+                        stroke="#8b5cf6"
+                        strokeWidth={2}
+                        dot={false}
+                        strokeDasharray="3 3"
+                        name="10-day MA"
+                      />
+                    </ComposedChart>
+                  </ResponsiveContainer>
+
+                  {/* Volume chart */}
+                  {data.some(item => item.volume) && (
+                    <ResponsiveContainer width="100%" height={120}>
+                      <BarChart data={data}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" opacity={0.2} />
+                        <XAxis
+                          dataKey={timeRange === '1d' || timeRange === '3d' ? 'time' : 'date'}
+                          stroke="var(--color-secondary-text)"
+                          fontSize={10}
+                          tick={{ fill: 'var(--color-secondary-text)' }}
+                        />
+                        <YAxis
+                          stroke="var(--color-secondary-text)"
+                          fontSize={10}
+                          tick={{ fill: 'var(--color-secondary-text)' }}
+                        />
+                        <Tooltip
+                          contentStyle={{
+                            backgroundColor: 'var(--color-card-bg)',
+                            border: '1px solid var(--color-border)',
+                            borderRadius: '8px',
+                            color: 'var(--color-primary-text)'
+                          }}
+                          formatter={(value) => [value?.toLocaleString(), 'Volume']}
+                        />
+                        <Bar
+                          dataKey="volume"
+                          fill="var(--color-brand)"
+                          fillOpacity={0.6}
+                          radius={[2, 2, 0, 0]}
+                        />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  )}
+
+                  {/* Chart legend */}
+                  <div className="flex items-center justify-center gap-6 text-xs">
+                    <div className="flex items-center gap-2">
+                      <div className={`w-3 h-3 rounded-full ${isPositive ? 'bg-[var(--color-gain)]' : 'bg-[var(--color-loss)]'}`}></div>
+                      <span className="text-[var(--color-secondary-text)]">Index Value</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <div className="w-3 h-0.5 bg-blue-500"></div>
+                      <span className="text-[var(--color-secondary-text)]">5-day MA</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <div className="w-3 h-0.5 bg-purple-500"></div>
+                      <span className="text-[var(--color-secondary-text)]">10-day MA</span>
+                    </div>
+                  </div>
+                </div>
               ) : (
-                <div className="flex items-center justify-center h-64 text-[var(--color-secondary-text)]">
-                  No data available for selected time range
+                <div className="flex items-center justify-center h-96 text-[var(--color-secondary-text)]">
+                  <div className="text-center">
+                    <Activity className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                    <p>No data available for selected time range</p>
+                    <button
+                      onClick={handleScrape}
+                      className="mt-4 px-4 py-2 bg-[var(--color-brand)] text-white rounded-lg hover:bg-[var(--color-brand)]/90 transition-colors"
+                    >
+                      Fetch Latest Data
+                    </button>
+                  </div>
                 </div>
               )}
             </>

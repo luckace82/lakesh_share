@@ -7,13 +7,53 @@ import { UserPlus, TrendingUp } from 'lucide-react';
 export default function Register() {
   const [form, setForm] = useState({ username: '', email: '', password: '', password2: '' });
   const [error, setError] = useState('');
+  const [fieldErrors, setFieldErrors] = useState({});
   const [loading, setLoading] = useState(false);
   const { loginUser } = useAuth();
   const navigate = useNavigate();
 
+  const validateForm = () => {
+    const errors = {};
+    
+    if (!form.username.trim()) {
+      errors.username = 'Username is required';
+    } else if (form.username.length < 3) {
+      errors.username = 'Username must be at least 3 characters';
+    }
+    
+    if (!form.email.trim()) {
+      errors.email = 'Email is required';
+    } else if (!/\S+@\S+\.\S+/.test(form.email)) {
+      errors.email = 'Email is invalid';
+    }
+    
+    if (!form.password) {
+      errors.password = 'Password is required';
+    } else if (form.password.length < 8) {
+      errors.password = 'Password must be at least 8 characters';
+    } else if (!/(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/.test(form.password)) {
+      errors.password = 'Password must contain uppercase, lowercase, and number';
+    }
+    
+    if (!form.password2) {
+      errors.password2 = 'Please confirm your password';
+    } else if (form.password !== form.password2) {
+      errors.password2 = 'Passwords do not match';
+    }
+    
+    setFieldErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
+    setFieldErrors({});
+    
+    if (!validateForm()) {
+      return;
+    }
+    
     setLoading(true);
     try {
       await register(form);
@@ -21,13 +61,29 @@ export default function Register() {
       await loginUser(res.data);
       navigate('/dashboard');
     } catch (err) {
+      console.error('Registration error:', err);
       const data = err.response?.data;
+      let errorMessage = 'Registration failed. Please try again.';
+      
       if (data) {
-        const msg = Object.values(data).flat().join(', ');
-        setError(msg);
-      } else {
-        setError('Registration failed');
+        // Handle Django validation errors
+        if (typeof data === 'object') {
+          const errors = [];
+          if (data.username) errors.push(`Username: ${data.username.join(', ')}`);
+          if (data.email) errors.push(`Email: ${data.email.join(', ')}`);
+          if (data.password) errors.push(`Password: ${data.password.join(', ')}`);
+          if (data.non_field_errors) errors.push(data.non_field_errors.join(', '));
+          if (data.detail) errors.push(data.detail);
+          
+          errorMessage = errors.length > 0 ? errors.join(', ') : 'Validation failed';
+        } else if (typeof data === 'string') {
+          errorMessage = data;
+        }
+      } else if (err.message) {
+        errorMessage = err.message;
       }
+      
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }
@@ -60,10 +116,13 @@ export default function Register() {
               type="text"
               value={form.username}
               onChange={(e) => setForm({ ...form, username: e.target.value })}
-              className="input"
+              className={`input ${fieldErrors.username ? 'border-[var(--color-loss)]' : ''}`}
               placeholder="Choose a username"
               required
             />
+            {fieldErrors.username && (
+              <p className="text-[var(--color-loss)] text-xs mt-1">{fieldErrors.username}</p>
+            )}
           </div>
           <div>
             <label className="block text-sm font-medium text-[var(--color-secondary-text)] mb-2">Email</label>
@@ -71,10 +130,13 @@ export default function Register() {
               type="email"
               value={form.email}
               onChange={(e) => setForm({ ...form, email: e.target.value })}
-              className="input"
+              className={`input ${fieldErrors.email ? 'border-[var(--color-loss)]' : ''}`}
               placeholder="Enter your email"
               required
             />
+            {fieldErrors.email && (
+              <p className="text-[var(--color-loss)] text-xs mt-1">{fieldErrors.email}</p>
+            )}
           </div>
           <div>
             <label className="block text-sm font-medium text-[var(--color-secondary-text)] mb-2">Password</label>
@@ -82,10 +144,13 @@ export default function Register() {
               type="password"
               value={form.password}
               onChange={(e) => setForm({ ...form, password: e.target.value })}
-              className="input"
-              placeholder="Create a password"
+              className={`input ${fieldErrors.password ? 'border-[var(--color-loss)]' : ''}`}
+              placeholder="Create a password (min 8 chars, uppercase, lowercase, number)"
               required
             />
+            {fieldErrors.password && (
+              <p className="text-[var(--color-loss)] text-xs mt-1">{fieldErrors.password}</p>
+            )}
           </div>
           <div>
             <label className="block text-sm font-medium text-[var(--color-secondary-text)] mb-2">Confirm Password</label>
@@ -93,10 +158,13 @@ export default function Register() {
               type="password"
               value={form.password2}
               onChange={(e) => setForm({ ...form, password2: e.target.value })}
-              className="input"
+              className={`input ${fieldErrors.password2 ? 'border-[var(--color-loss)]' : ''}`}
               placeholder="Confirm your password"
               required
             />
+            {fieldErrors.password2 && (
+              <p className="text-[var(--color-loss)] text-xs mt-1">{fieldErrors.password2}</p>
+            )}
           </div>
           <button
             type="submit"

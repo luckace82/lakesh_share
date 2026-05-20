@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const API_BASE = 'http://192.168.1.14:8000/api';
+const API_BASE = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000/api';
 
 const api = axios.create({
   baseURL: API_BASE,
@@ -89,6 +89,10 @@ export const getNEPSEPredictions = () => api.get('/nepse-index/predictions/');
 export const getNEPSEIndexStats = () => api.get('/nepse-index/stats/');
 export const generateNEPSEPrediction = () => api.post('/nepse-index/predict/');
 export const getMarketStats = () => api.get('/market-stats/');
+
+// Chat
+export const chatQuery = (data) => api.post('/chat/query/', data);
+export const stockSearch = (data) => api.post('/chat/search/', data);
 
 // Download helper
 export const downloadCSV = (symbol, history) => {
