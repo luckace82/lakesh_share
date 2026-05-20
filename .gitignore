@@ -1,8 +1,11 @@
 venv/
 .env
-__pycache__/
+**/__pycache__/
 *.pyc
 *.pyo
 *.pyd
 .Python
 *.so
+
+# Ignore compiled migration files only
+**/migrations/*.pyc
