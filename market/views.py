@@ -1090,6 +1090,26 @@ def scrape_nepse_index(request):
 
 
 @api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def scrape_task_status(request, task_id):
+    """Return the status/result of a background Celery task (e.g. NEPSE scrape)."""
+    from celery.result import AsyncResult
+
+    result = AsyncResult(task_id)
+    payload = {
+        'task_id': task_id,
+        'state': result.state,          # PENDING / STARTED / SUCCESS / FAILURE
+        'ready': result.ready(),
+    }
+    if result.ready():
+        try:
+            payload['result'] = result.result if result.successful() else str(result.result)
+        except Exception:
+            payload['result'] = None
+    return Response(payload)
+
+
+@api_view(['GET'])
 @permission_classes([AllowAny])
 def nepse_insights(request):
     """Get NEPSE index AI insights"""

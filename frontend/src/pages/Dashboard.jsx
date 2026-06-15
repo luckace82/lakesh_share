@@ -2,108 +2,10 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { getKnownStocks, getWatchlist, addToWatchlist, removeFromWatchlist, getStocks, autoScrapeWatchlist, getStockHistory, triggerScrape, getMarketStats, getBulkScrapeProgress, getScrapedStocksList } from '../api/client';
-import { Sparklines, SparklinesLine, SparklinesBars } from 'react-sparklines';
-import { Search, Plus, X, Star, TrendingUp, TrendingDown, Database, RefreshCw, Activity, Loader2, Sun, Moon, Activity as VolumeIcon, Clock, ArrowUpRight, ArrowDownRight } from 'lucide-react';
+import WatchlistCard from '../components/WatchlistCard';
+import StockCard from '../components/StockCard';
+import { Search, Plus, X, Star, TrendingUp, TrendingDown, Database, RefreshCw, Activity, Loader2, Sun, Moon } from 'lucide-react';
 import NEPSEIndexChart from '../components/NEPSEIndexChart';
-
-function WatchlistCard({ item, onRemove, history }) {
-  const stock = item.stock;
-  const price = item.latest_price;
-  const isUp = price && parseFloat(price.change) >= 0;
-
-  // Calculate RSI from history
-  const calculateRSI = (prices, period = 14) => {
-    if (!prices || prices.length < period + 1) return 50;
-    const recent = prices.slice(-period - 1);
-    let gains = 0, losses = 0;
-    for (let i = 1; i < recent.length; i++) {
-      const diff = recent[i] - recent[i - 1];
-      if (diff > 0) gains += diff;
-      else losses -= diff;
-    }
-    const avgGain = gains / period;
-    const avgLoss = losses / period;
-    if (avgLoss === 0) return 100;
-    const rs = avgGain / avgLoss;
-    return 100 - (100 / (1 + rs));
-  };
-
-  // Check for volume spike (volume > 2x average of last 10 days)
-  const checkVolumeSpike = (history) => {
-    if (!history || !Array.isArray(history) || history.length < 11) return false;
-    const volumes = history.slice(-11, -1).map(h => parseFloat(h.volume));
-    const avgVolume = volumes.reduce((a, b) => a + b, 0) / volumes.length;
-    const latestVolume = parseFloat(history[history.length - 1].volume);
-    return latestVolume > avgVolume * 2;
-  };
-
-  const rsi = history && Array.isArray(history) && history.length > 14 ? calculateRSI(history.map(h => parseFloat(h.close))) : 50;
-  const hasVolumeSpike = checkVolumeSpike(history);
-  const sparklineData = history && Array.isArray(history) ? history.slice(-20).map(h => parseFloat(h.close)) : [];
-
-  return (
-    <div className="card group">
-      <div className="flex items-start justify-between mb-3">
-        <Link to={`/stocks/${stock.symbol}`} className="no-underline flex-1">
-          <div className="flex items-center gap-2">
-            <span className="text-[18px] font-bold font-mono text-[var(--color-primary-text)] group-hover:text-[var(--color-brand)] transition-colors">{stock.symbol}</span>
-            {hasVolumeSpike && <VolumeIcon className="h-4 w-4 text-[var(--color-warning)]" title="Volume spike" />}
-          </div>
-          <p className="text-[var(--color-secondary-text)] text-sm mt-1 truncate">{stock.name}</p>
-        </Link>
-        <button
-          onClick={() => onRemove(stock.symbol)}
-          className="p-2 rounded-lg hover:bg-[var(--color-loss-tint)] text-[var(--color-secondary-text)] hover:text-[var(--color-loss)] border-0 bg-transparent opacity-0 group-hover:opacity-100 transition-all cursor-pointer"
-          title="Remove from watchlist"
-        >
-          <X className="h-4 w-4" />
-        </button>
-      </div>
-
-      {/* Sparkline */}
-      <div className="mb-3">
-        {sparklineData.length > 0 ? (
-          <Sparklines data={sparklineData} width={100} height={30} margin={0}>
-            <SparklinesLine color={isUp ? 'var(--color-gain)' : 'var(--color-loss)'} />
-          </Sparklines>
-        ) : (
-          <div className="text-[var(--color-secondary-text)] text-xs">No trend data</div>
-        )}
-      </div>
-
-      {/* Price + % Change */}
-      <div className="flex items-end justify-between mb-3">
-        {price ? (
-          <div>
-            <p className="text-[16px] font-mono font-bold text-[var(--color-primary-text)]">NPR {parseFloat(price.ltp).toLocaleString()}</p>
-            <div className={`badge ${isUp ? 'badge-gain' : 'badge-loss'} mt-1`}>
-              {isUp ? '+' : ''}{price.change_percent}%
-            </div>
-          </div>
-        ) : (
-          <div>
-            <p className="text-[var(--color-secondary-text)] text-sm">No price data</p>
-          </div>
-        )}
-      </div>
-
-      {/* RSI Mini Bar */}
-      <div className="flex items-center gap-2">
-        <span className="text-[10px] text-[var(--color-secondary-text)]">RSI</span>
-        <div className="flex-1 h-2 bg-[var(--color-border)] rounded-full overflow-hidden">
-          <div
-            className="h-full rounded-full transition-all"
-            style={{
-              width: `${rsi}%`,
-              backgroundColor: rsi > 70 ? 'var(--color-loss)' : rsi < 30 ? 'var(--color-gain)' : 'var(--color-brand)'
-            }}
-          />
-        </div>
-        <span className="text-[10px] font-mono text-[var(--color-secondary-text)]">{rsi.toFixed(0)}</span>
-      </div>
-    </div>
-  );
-}
 
 export default function Dashboard() {
   const { user } = useAuth();
@@ -112,6 +14,7 @@ export default function Dashboard() {
   const [watchlist, setWatchlist] = useState([]);
   const [watchlistHistory, setWatchlistHistory] = useState({});
   const [dbStocks, setDbStocks] = useState([]);
+  const [dbStockHistories, setDbStockHistories] = useState({});
   const [marketStats, setMarketStats] = useState(null);
   const [loading, setLoading] = useState(true);
   const [scraping, setScraping] = useState(false);
@@ -132,8 +35,11 @@ export default function Dashboard() {
       const watchlistData = Array.isArray(data) ? data : [];
       setWatchlist(watchlistData);
 
-      // Fetch historical data for sparklines and indicators
+      // Fetch historical data for sparklines and indicators (skip symbols with slashes)
       const historyPromises = watchlistData.map(async (item) => {
+        if (item.stock.symbol.includes('/')) {
+          return { [item.stock.symbol]: [] };
+        }
         try {
           const history = await getStockHistory(item.stock.symbol, 90);
           return { [item.stock.symbol]: history };
@@ -154,6 +60,26 @@ export default function Dashboard() {
     try {
       const res = await getStocks();
       setDbStocks(res.data);
+
+      // Fetch history for sparklines (skip symbols with slashes — backend route conflict)
+      const historyPromises = res.data.map(async (stock) => {
+        if (stock.symbol.includes('/')) {
+          return { symbol: stock.symbol, history: [] };
+        }
+        try {
+          const histRes = await getStockHistory(stock.symbol, 30);
+          return { symbol: stock.symbol, history: histRes.data };
+        } catch {
+          return { symbol: stock.symbol, history: [] };
+        }
+      });
+
+      const historyResults = await Promise.all(historyPromises);
+      const historyMap = {};
+      historyResults.forEach(({ symbol, history }) => {
+        historyMap[symbol] = history;
+      });
+      setDbStockHistories(historyMap);
     } catch (error) {
       console.error('Error fetching stocks:', error);
     }
@@ -323,7 +249,7 @@ export default function Dashboard() {
   }
 
   return (
-    <div className="p-8">
+    <div>
       {/* Header */}
       <div className="flex items-center justify-between mb-8">
         <div>
@@ -368,7 +294,7 @@ export default function Dashboard() {
           <p className="text-[11px] font-medium uppercase tracking-wider text-[var(--color-secondary-text)]">Stocks</p>
           <p className="text-[36px] font-bold font-mono text-[var(--color-primary-text)] mt-2">{dbStocks.length}</p>
         </div>
-        <div className="card cursor-pointer hover:opacity-80 transition-opacity" onClick={handleShowScrapedStocks}>
+        <div className="card cursor-pointer" onClick={handleShowScrapedStocks}>
           <p className="text-[11px] font-medium uppercase tracking-wider text-[var(--color-secondary-text)]">Scraped</p>
           <p className="text-[36px] font-bold font-mono text-[var(--color-primary-text)] mt-2">{marketStats?.scraped_stocks || 0}</p>
         </div>
@@ -439,7 +365,7 @@ export default function Dashboard() {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {watchlist.map((item) => (
-              <WatchlistCard key={item.id} item={item} onRemove={handleRemove} history={watchlistHistory[item.stock.symbol] || []} />
+              <WatchlistCard key={item.id} item={item} onRemove={handleRemove} history={watchlistHistory[item.stock.symbol] || []} variant="compact" />
             ))}
           </div>
         )}
@@ -475,23 +401,12 @@ export default function Dashboard() {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
             {filteredStocks.slice(0, 40).map((stock) => (
-              <Link 
-                key={stock.id} 
-                to={`/stocks/${stock.symbol}`}
-                className="card p-4 hover:border-[var(--color-brand)] no-underline block transition-all group"
-              >
-                <div className="flex items-center justify-between">
-                  <span className="font-mono font-bold text-[var(--color-primary-text)] group-hover:text-[var(--color-brand)] transition-colors">{stock.symbol}</span>
-                  <div className="flex items-center gap-1 text-xs text-[var(--color-secondary-text)]">
-                    <Activity className="h-3 w-3" />
-                    {stock.daily_count}d
-                  </div>
-                </div>
-                <p className="text-[var(--color-secondary-text)] text-sm mt-2 truncate">{stock.name}</p>
-                {stock.sector && (
-                  <span className="badge badge-info mt-3">{stock.sector}</span>
-                )}
-              </Link>
+              <StockCard
+                key={stock.id}
+                stock={stock}
+                history={dbStockHistories[stock.symbol] || []}
+                variant="simple"
+              />
             ))}
           </div>
         )}

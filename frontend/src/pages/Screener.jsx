@@ -217,7 +217,7 @@ export default function Screener() {
   };
 
   return (
-    <div className="p-6">
+    <div>
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold flex items-center gap-2">
           <Search className="h-6 w-6" />
@@ -226,7 +226,7 @@ export default function Screener() {
         <button
           onClick={handleAutoScreen}
           disabled={aiLoading}
-          className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-purple-500 to-pink-500 text-white rounded-lg hover:from-purple-600 hover:to-pink-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+          className="btn-primary flex items-center gap-2 px-4 py-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {aiLoading ? (
             <>

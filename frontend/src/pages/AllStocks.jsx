@@ -1,46 +1,11 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Link } from 'react-router-dom';
-import { getAllStocksWithPrices } from '../api/client';
-import { TrendingUp, TrendingDown, Search } from 'lucide-react';
-
-function StockCard({ stock }) {
-  const price = stock.latest_price;
-  const isUp = price && price.change && parseFloat(price.change) >= 0;
-
-  return (
-    <div className="card p-4 hover:border-[var(--color-brand)] transition-colors">
-      <Link to={`/stock/${stock.symbol}`} className="no-underline">
-        <div className="flex items-center justify-between mb-2">
-          <div>
-            <span className="text-[18px] font-bold font-mono text-[var(--color-primary-text)] hover:text-[var(--color-brand)] transition-colors">{stock.symbol}</span>
-            <p className="text-[var(--color-secondary-text)] text-sm">{stock.name}</p>
-          </div>
-          {price ? (
-            <div className="text-right">
-              <span className="text-[24px] font-bold font-mono text-[var(--color-primary-text)]">
-                {parseFloat(price.ltp).toFixed(2)}
-              </span>
-              <div className={`flex items-center gap-1 text-sm font-medium ${isUp ? 'text-[var(--color-gain)]' : 'text-[var(--color-loss)]'}`}>
-                {isUp ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
-                <span>{parseFloat(price.change).toFixed(2)}</span>
-                <span>({parseFloat(price.change_percent).toFixed(2)}%)</span>
-              </div>
-            </div>
-          ) : (
-            <span className="text-[var(--color-secondary-text)] text-sm">No data</span>
-          )}
-        </div>
-        <div className="flex items-center justify-between text-[11px] text-[var(--color-secondary-text)]">
-          <span>Sector: {stock.sector || 'N/A'}</span>
-          {stock.daily_count && <span>{stock.daily_count} records</span>}
-        </div>
-      </Link>
-    </div>
-  );
-}
+import { getAllStocksWithPrices, getStockHistory } from '../api/client';
+import StockCard from '../components/StockCard';
+import { Search } from 'lucide-react';
 
 export default function AllStocks() {
   const [stocks, setStocks] = useState([]);
+  const [stockHistories, setStockHistories] = useState({});
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [sector, setSector] = useState('');
@@ -53,6 +18,26 @@ export default function AllStocks() {
       
       const res = await getAllStocksWithPrices(params);
       setStocks(res.data);
+
+      // Fetch history for sparklines (skip symbols with slashes — backend route conflict)
+      const historyPromises = res.data.map(async (stock) => {
+        if (stock.symbol.includes('/')) {
+          return { symbol: stock.symbol, history: [] };
+        }
+        try {
+          const histRes = await getStockHistory(stock.symbol, 30);
+          return { symbol: stock.symbol, history: histRes.data };
+        } catch {
+          return { symbol: stock.symbol, history: [] };
+        }
+      });
+
+      const historyResults = await Promise.all(historyPromises);
+      const historyMap = {};
+      historyResults.forEach(({ symbol, history }) => {
+        historyMap[symbol] = history;
+      });
+      setStockHistories(historyMap);
     } catch (error) {
       console.error('Error fetching stocks:', error);
     } finally {
@@ -73,7 +58,7 @@ export default function AllStocks() {
   }
 
   return (
-    <div className="p-6">
+    <div>
       <div className="mb-6">
         <h1 className="text-[28px] font-bold text-[var(--color-primary-text)] mb-4">
           All Stocks
@@ -110,7 +95,7 @@ export default function AllStocks() {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
           {stocks.map((stock) => (
-            <StockCard key={stock.id} stock={stock} />
+            <StockCard key={stock.id} stock={stock} history={stockHistories[stock.symbol] || []} />
           ))}
         </div>
       )}

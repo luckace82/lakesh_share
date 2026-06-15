@@ -34,10 +34,14 @@ export default function StockDetail() {
       // Stock not in DB yet — that's OK
       setStock({ symbol: symbol.toUpperCase(), name: symbol.toUpperCase(), daily_count: 0 });
     }
-    try {
-      const histRes = await getStockHistory(symbol);
-      setHistory(histRes.data);
-    } catch {
+    if (!symbol.includes('/')) {
+      try {
+        const histRes = await getStockHistory(symbol);
+        setHistory(histRes.data);
+      } catch {
+        setHistory([]);
+      }
+    } else {
       setHistory([]);
     }
     setLoading(false);
@@ -57,7 +61,7 @@ export default function StockDetail() {
   }
 
   return (
-    <div className="p-8">
+    <div>
       {/* Header */}
       <div className="card mb-8">
         <div className="flex items-center justify-between">
@@ -91,9 +95,9 @@ export default function StockDetail() {
             <button
               key={t.key}
               onClick={() => setTab(t.key)}
-              className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors border-0 ${
+              className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium border-0 cursor-pointer transition-colors ${
                 isActive
-                  ? 'bg-[var(--color-brand-tint)] text-[var(--color-brand)] border-b-2 border-[var(--color-brand)]'
+                  ? 'bg-[var(--color-brand)] text-white'
                   : 'text-[var(--color-secondary-text)] hover:text-[var(--color-primary-text)] hover:bg-[var(--color-border)] bg-transparent'
               }`}
             >
@@ -106,7 +110,7 @@ export default function StockDetail() {
 
       {/* Tab Content */}
       <div className="card">
-        {tab === 'overview' && <OverviewTab stock={stock} history={history} user={user} />}
+        {tab === 'overview' && <OverviewTab stock={stock} history={history} onRefresh={fetchData} />}
         {tab === 'charts' && <ChartsTab stock={stock} history={history} />}
         {tab === 'history' && <HistoryTab history={history} />}
         {tab === 'ai' && <AITab symbol={symbol} user={user} />}

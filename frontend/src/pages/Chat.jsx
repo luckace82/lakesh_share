@@ -75,7 +75,7 @@ export default function Chat() {
       {/* Header */}
       <div className="border-b border-[var(--color-border)] p-4">
         <div className="flex items-center gap-3">
-          <div className="bg-gradient-to-r from-purple-500 to-pink-500 p-2 rounded-lg">
+          <div className="bg-[var(--color-brand)] p-2 rounded-lg">
             <Bot className="h-5 w-5 text-white" />
           </div>
           <div>
@@ -110,7 +110,7 @@ export default function Chat() {
           messages.map((message, index) => (
             <div key={index} className={`flex gap-3 ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
               {message.role === 'assistant' && (
-                <div className="bg-gradient-to-r from-purple-500 to-pink-500 p-2 rounded-lg h-8 w-8 flex items-center justify-center flex-shrink-0">
+                <div className="bg-[var(--color-brand)] p-2 rounded-lg h-8 w-8 flex items-center justify-center flex-shrink-0">
                   <Bot className="h-4 w-4 text-white" />
                 </div>
               )}
@@ -175,12 +175,12 @@ export default function Chat() {
         
         {isLoading && (
           <div className="flex gap-3 justify-start">
-            <div className="bg-gradient-to-r from-purple-500 to-pink-500 p-2 rounded-lg h-8 w-8 flex items-center justify-center">
+            <div className="bg-[var(--color-brand)] p-2 rounded-lg h-8 w-8 flex items-center justify-center">
               <Bot className="h-4 w-4 text-white" />
             </div>
             <div className="bg-[var(--color-card-bg)] border border-[var(--color-border)] rounded-lg p-3">
               <div className="flex items-center gap-2">
-                <Sparkles className="h-4 w-4 text-[var(--color-brand)] animate-pulse" />
+                <Sparkles className="h-4 w-4 text-[var(--color-brand)]" />
                 <span className="text-sm text-[var(--color-secondary-text)]">Thinking...</span>
               </div>
             </div>

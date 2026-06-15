@@ -78,7 +78,7 @@
   
   body {
     @apply bg-[var(--color-page-bg)] text-[var(--color-primary-text)] antialiased;
-    font-family: Arial, -apple-system, BlinkMacSystemFont, sans-serif;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   }
   
   /* Monospace for numbers */
@@ -167,13 +167,9 @@
   background-color: var(--color-primary-text);
 }
 
-/* Smooth transitions */
-* {
-  @apply transition-colors duration-200;
-}
-
-button, a, input, select, textarea {
-  @apply transition-all duration-200;
+/* Smooth transitions — scoped to avoid global perf issues */
+button, a, input, select, textarea, .card, .sidebar-item {
+  @apply transition-colors duration-150;
 }
 
 /* Focus styles */
@@ -185,19 +181,19 @@ input:focus, textarea:focus, select:focus {
 
 /* Professional button styles */
 .btn-primary {
-  @apply bg-[var(--color-brand)] hover:bg-[var(--color-gain)] text-white font-medium px-4 py-2 rounded-lg border-0 active:scale-95;
+  @apply bg-[var(--color-brand)] hover:bg-[var(--color-gain)] text-white font-medium px-4 py-2 rounded-lg border-0;
 }
 
 .btn-secondary {
-  @apply bg-[var(--color-card-bg)] hover:bg-[var(--color-border)] text-[var(--color-primary-text)] font-medium px-4 py-2 rounded-lg border border-[var(--color-border)] active:scale-95;
+  @apply bg-[var(--color-card-bg)] hover:bg-[var(--color-border)] text-[var(--color-primary-text)] font-medium px-4 py-2 rounded-lg border border-[var(--color-border)];
 }
 
 .btn-ghost {
-  @apply text-[var(--color-secondary-text)] hover:text-[var(--color-primary-text)] hover:bg-[var(--color-card-bg)] px-3 py-2 rounded-lg border-0 active:scale-95;
+  @apply text-[var(--color-secondary-text)] hover:text-[var(--color-primary-text)] hover:bg-[var(--color-card-bg)] px-3 py-2 rounded-lg border-0;
 }
 
 .btn-danger {
-  @apply bg-[var(--color-loss-tint)] hover:bg-[var(--color-loss-tint)] text-[var(--color-loss-text)] font-medium px-4 py-2 rounded-lg border-0 active:scale-95;
+  @apply bg-[var(--color-loss-tint)] hover:bg-[var(--color-loss-tint)] text-[var(--color-loss-text)] font-medium px-4 py-2 rounded-lg border-0;
 }
 
 .btn-link {
@@ -206,11 +202,37 @@ input:focus, textarea:focus, select:focus {
 
 /* Professional card styles */
 .card {
-  @apply bg-[var(--color-card-bg)] border border-[var(--color-border)] rounded-lg p-6 hover:border-[var(--color-secondary-text)] transition-all;
+  @apply bg-[var(--color-card-bg)] border border-[var(--color-border)] rounded-lg p-6;
+  transition: transform 150ms ease, box-shadow 150ms ease;
+}
+
+.card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+}
+
+/* Tab crossfade */
+.tab-content {
+  animation: fadeIn 200ms ease-in-out;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Price flash animation */
+@keyframes priceFlash {
+  0% { background-color: rgba(34, 197, 94, 0.2); }
+  100% { background-color: transparent; }
+}
+
+.price-flash {
+  animation: priceFlash 800ms ease-out;
 }
 
 .card-elevated {
-  @apply bg-[var(--color-card-bg)] border border-[var(--color-border)] rounded-lg p-6 shadow-sm hover:border-[var(--color-secondary-text)] transition-all;
+  @apply bg-[var(--color-card-bg)] border border-[var(--color-border)] rounded-lg p-6 shadow-sm;
 }
 
 /* Professional input styles */
@@ -277,17 +299,38 @@ input:focus, textarea:focus, select:focus {
 /* Sidebar styles */
 .sidebar {
   @apply w-[220px] bg-[var(--color-sidebar-bg)] border-r border-[var(--color-border)] flex flex-col fixed left-0 top-0 bottom-0 z-40;
+  transition: transform 0.3s ease-in-out;
+}
+
+@media (max-width: 768px) {
+  .sidebar {
+    transform: translateX(-100%);
+  }
+  .sidebar.mobile-open {
+    transform: translateX(0);
+  }
 }
 
 .sidebar-item {
-  @apply flex items-center gap-3 px-4 py-3 text-[var(--color-secondary-text)] hover:bg-[var(--color-card-bg)] hover:text-[var(--color-primary-text)] transition-colors cursor-pointer border-l-2 border-transparent;
+  @apply flex items-center gap-3 px-4 py-2.5 text-[var(--color-secondary-text)] hover:bg-[var(--color-card-bg)] hover:text-[var(--color-primary-text)] transition-colors cursor-pointer rounded-md mx-2;
 }
 
 .sidebar-item.active {
-  @apply bg-[var(--color-brand-tint)] text-[var(--color-brand)] border-l-2 border-[var(--color-brand)] font-medium;
+  @apply bg-[var(--color-card-bg)] text-[var(--color-primary-text)] font-medium;
 }
 
 /* Main content area */
 .main-content {
-  @apply ml-[220px] min-h-screen;
+  @apply min-h-screen ml-0 md:ml-[220px];
+}
+
+/* Mobile overlay */
+.mobile-overlay {
+  @apply fixed inset-0 bg-black/50 z-30 md:hidden;
+}
+
+/* Tabular numerals for financial data */
+.numeric {
+  font-variant-numeric: tabular-nums;
+  font-family: 'JetBrains Mono', 'Roboto Mono', 'Courier New', monospace;
 }

@@ -10,15 +10,20 @@ logger = logging.getLogger(__name__)
 
 
 @shared_task(bind=True)
-def run_scrape_task(self, job_id):
-    """Celery task for scraping stock data"""
-    return _execute_scrape(job_id)
+def run_scrape_task(self, job_id, incremental=None):
+    """Celery task for scraping stock data.
 
-@shared_task(bind=True)
-def scrape_all_stocks_task(self):
-    """Celery task to scrape all known stocks from NEPSE_STOCKS (limited to 1 year of data)"""
-    from .known_stocks import NEPSE_STOCKS
-    from .models import Stock, ScrapeJob, BulkScrapeJob
+    If `incremental` is None, auto-detect: stocks that already have price data
+    use a fast incremental scrape (few pages); brand-new stocks do a full scrape.
+    """
+    if incremental is None:
+        from .models import ScrapeJob, DailyPrice
+        try:
+            job = ScrapeJob.objects.get(id=job_id)
+            incremental = DailyPrice.objects.filter(stock=job.stock).exists()
+        except Exception:
+            incremental = False
+    return _execute_scrape(job_id, incremental=incremental)
 
 @shared_task(bind=True)
 def ai_screener_task(self, symbols=None, sector=None, limit=10):
@@ -30,22 +35,23 @@ def ai_screener_task(self, symbols=None, sector=None, limit=10):
     User = get_user_model()
     admin_user = User.objects.filter(is_superuser=True).first()
 
-    # Get stocks
+    # Get or create stocks
     if symbols:
-        # Get specific stocks by symbols
-        stocks = list(Stock.objects.filter(
-            is_active=True,
-            symbol__in=symbols
-        ))
+        from .known_stocks import NEPSE_STOCKS
+        stocks = []
+        for sym in symbols:
+            stock_info = next((s for s in NEPSE_STOCKS if s['symbol'] == sym), None)
+            name = stock_info.get('name', sym)[:20] if stock_info else sym
+            sector_name = stock_info.get('sector', '') if stock_info else ''
+            stock, created = Stock.objects.get_or_create(
+                symbol=sym,
+                defaults={'name': name, 'sector': sector_name, 'is_active': True}
+            )
+            stocks.append(stock)
     else:
-        # Get stocks
-        queryset = Stock.objects.filter(
-            is_active=True
-        )
-
+        queryset = Stock.objects.filter(is_active=True)
         if sector:
             queryset = queryset.filter(sector__icontains=sector)
-
         stocks = list(queryset[:limit])
 
     if not stocks:
@@ -72,12 +78,37 @@ def ai_screener_task(self, symbols=None, sector=None, limit=10):
     recommendations = []
 
     try:
-        from .models import DailyPrice
+        from .models import DailyPrice, ScrapeJob
         from datetime import timedelta
         import json
         import re
 
+        # ------------------------------------------------------------------
+        # Pre-flight: auto-scrape any stock that lacks recent price data
+        # ------------------------------------------------------------------
+        cutoff = timezone.now().date() - timedelta(days=7)
+        for stock in stocks:
+            has_data = stock.daily_prices.filter(date__gte=cutoff).exists()
+            if not has_data:
+                logger.info(f"{stock.symbol} has no recent data — scraping now …")
+                job.current_stock = f"{stock.symbol} (scraping)"
+                job.save()
+
+                scrape_job = ScrapeJob.objects.create(
+                    user=admin_user,
+                    stock=stock,
+                    status='pending'
+                )
+                try:
+                    _execute_scrape(scrape_job.id, incremental=True)
+                    # Refresh stock instance so indicators are visible
+                    stock.refresh_from_db()
+                except Exception as e:
+                    logger.warning(f"Auto-scrape failed for {stock.symbol}: {e}")
+
+        # ------------------------------------------------------------------
         # Screen each stock individually
+        # ------------------------------------------------------------------
         for i, stock in enumerate(stocks):
             # Update progress
             job.current_stock = stock.symbol
@@ -85,7 +116,6 @@ def ai_screener_task(self, symbols=None, sector=None, limit=10):
             job.save()
 
             # Get 7 days of historical price data
-            cutoff = timezone.now().date() - timedelta(days=7)
             try:
                 recent_prices = list(stock.daily_prices.filter(date__gte=cutoff).order_by('date').values('date', 'open', 'high', 'low', 'close', 'volume'))
             except Exception as e:
@@ -205,16 +235,77 @@ Be concise and data-driven."""
         return {'error': str(e)}
 
 @shared_task(bind=True)
-def scrape_all_stocks_task(self):
-    """Celery task to scrape all known stocks from NEPSE_STOCKS (limited to 1 year of data)"""
+def scrape_single_stock_task(self, symbol, bulk_job_id=None, incremental=True):
+    """Celery task to scrape a single stock - used for parallel execution"""
     from .known_stocks import NEPSE_STOCKS
     from .models import Stock, ScrapeJob, BulkScrapeJob
     from django.contrib.auth import get_user_model
+    from django.db import models
+
+    User = get_user_model()
+    admin_user = User.objects.filter(is_superuser=True).first()
+
+    try:
+        # Find stock info from NEPSE_STOCKS
+        stock_info = next((s for s in NEPSE_STOCKS if s['symbol'] == symbol), None)
+        name = stock_info.get('name', symbol)[:20] if stock_info else symbol
+        
+        stock, _ = Stock.objects.get_or_create(symbol=symbol, defaults={'name': name})
+
+        # Check if already running
+        running = ScrapeJob.objects.filter(stock=stock, status__in=['pending', 'running']).exists()
+        if running:
+            return {'symbol': symbol, 'status': 'skipped', 'reason': 'already_running'}
+
+        job = ScrapeJob.objects.create(
+            user=admin_user,
+            stock=stock,
+            status='pending'
+        )
+
+        _execute_scrape(job.id, incremental=incremental)
+        
+        # Update bulk job progress if provided
+        if bulk_job_id:
+            try:
+                BulkScrapeJob.objects.filter(id=bulk_job_id).update(
+                    scraped_stocks=models.F('scraped_stocks') + 1,
+                    current_symbol=symbol
+                )
+            except Exception:
+                pass
+
+        return {'symbol': symbol, 'status': 'completed', 'records': job.records_saved}
+
+    except Exception as e:
+        logger.error(f"Error scraping {symbol}: {e}")
+        if bulk_job_id:
+            try:
+                BulkScrapeJob.objects.filter(id=bulk_job_id).update(
+                    failed_stocks=models.F('failed_stocks') + 1
+                )
+            except Exception:
+                pass
+        return {'symbol': symbol, 'status': 'failed', 'error': str(e)}
+
+
+@shared_task(bind=True)
+def scrape_all_stocks_task(self, parallel=True, batch_size=5):
+    """
+    Celery task to scrape all known stocks from NEPSE_STOCKS.
+    
+    Args:
+        parallel: If True, dispatch individual tasks for parallel execution
+        batch_size: Number of concurrent scraping tasks (default 5 to avoid overloading)
+    """
+    from .known_stocks import NEPSE_STOCKS
+    from .models import Stock, ScrapeJob, BulkScrapeJob
+    from django.contrib.auth import get_user_model
+    from celery import group, chord
+    from django.db import models
 
     User = get_user_model()
     total_stocks = len(NEPSE_STOCKS)
-    scraped_count = 0
-    failed_count = 0
 
     # Create bulk scrape job
     admin_user = User.objects.filter(is_superuser=True).first()
@@ -226,48 +317,79 @@ def scrape_all_stocks_task(self):
         failed_stocks=0
     )
 
-    for stock_data in NEPSE_STOCKS:
-        try:
-            symbol = stock_data['symbol']
-            name = stock_data.get('name', symbol)[:20]
-            stock, _ = Stock.objects.get_or_create(symbol=symbol, defaults={'name': name})
+    if parallel:
+        # Dispatch parallel tasks in batches
+        symbols = [s['symbol'] for s in NEPSE_STOCKS]
+        
+        # Create tasks for all stocks
+        tasks = [
+            scrape_single_stock_task.s(symbol, bulk_job.id, True)
+            for symbol in symbols
+        ]
+        
+        # Execute in batches to avoid overwhelming the system
+        # Using group for parallel execution
+        job_group = group(tasks)
+        result = job_group.apply_async()
+        
+        # Store task group ID for tracking
+        bulk_job.error = f"task_group_id:{result.id}"
+        bulk_job.save()
+        
+        return {
+            'bulk_job_id': bulk_job.id,
+            'total': total_stocks,
+            'mode': 'parallel',
+            'task_group_id': result.id
+        }
+    
+    else:
+        # Sequential mode (original behavior, but with browser reuse)
+        scraped_count = 0
+        failed_count = 0
 
-            bulk_job.current_symbol = symbol
-            bulk_job.save()
+        for stock_data in NEPSE_STOCKS:
+            try:
+                symbol = stock_data['symbol']
+                name = stock_data.get('name', symbol)[:20]
+                stock, _ = Stock.objects.get_or_create(symbol=symbol, defaults={'name': name})
 
-            running = ScrapeJob.objects.filter(stock=stock, status__in=['pending', 'running']).exists()
-            if running:
+                bulk_job.current_symbol = symbol
+                bulk_job.save()
+
+                running = ScrapeJob.objects.filter(stock=stock, status__in=['pending', 'running']).exists()
+                if running:
+                    continue
+
+                job = ScrapeJob.objects.create(
+                    user=admin_user,
+                    stock=stock,
+                    status='pending'
+                )
+
+                _execute_scrape(job.id, incremental=True)
+                scraped_count += 1
+                bulk_job.scraped_stocks = scraped_count
+                bulk_job.save()
+
+            except Exception as e:
+                logger.error(f"Error scraping {stock_data}: {e}")
+                failed_count += 1
+                bulk_job.failed_stocks = failed_count
+                bulk_job.save()
                 continue
 
-            job = ScrapeJob.objects.create(
-                user=admin_user,
-                stock=stock,
-                status='pending'
-            )
+        bulk_job.status = 'completed'
+        bulk_job.completed_at = timezone.now()
+        bulk_job.current_symbol = ''
+        bulk_job.save()
 
-            _execute_scrape(job.id, incremental=True)
-            scraped_count += 1
-            bulk_job.scraped_stocks = scraped_count
-            bulk_job.save()
-
-        except Exception as e:
-            logger.error(f"Error scraping {stock_data}: {e}")
-            failed_count += 1
-            bulk_job.failed_stocks = failed_count
-            bulk_job.save()
-            continue
-
-    bulk_job.status = 'completed'
-    bulk_job.completed_at = timezone.now()
-    bulk_job.current_symbol = ''
-    bulk_job.save()
-
-    return {
-        'total': total_stocks,
-        'scraped': scraped_count,
-        'failed': failed_count,
-        'skipped': total_stocks - scraped_count - failed_count
-    }
+        return {
+            'total': total_stocks,
+            'scraped': scraped_count,
+            'failed': failed_count,
+            'skipped': total_stocks - scraped_count - failed_count
+        }
 
 
 @shared_task(bind=True)
@@ -314,7 +436,10 @@ def scrape_nepse_index_task(self, historical_days=None, force_all=False):
         # ------------------------------------------------------------------ #
         # 2.  Scrape
         # ------------------------------------------------------------------ #
-        data_list = scrape_nepse_index_historical(days=days_to_scrape)
+        data_list = scrape_nepse_index_historical(
+            days=days_to_scrape,
+            stop_timestamp=incremental_cutoff,
+        )
 
         if not data_list:
             logger.error("Scraper returned no data.")
@@ -338,39 +463,27 @@ def scrape_nepse_index_task(self, historical_days=None, force_all=False):
             return {'success': True, 'created': 0, 'updated': 0, 'total': 0}
 
         # ------------------------------------------------------------------ #
-        # 4.  Upsert via bulk_create(update_conflicts=True)
-        #     This is a single SQL statement — far faster than a Python loop.
+        # 4.  Upsert via update_or_create (safe without DB unique constraint)
         # ------------------------------------------------------------------ #
-        objects = [
-            NEPSEIndex(
-                timestamp=d['timestamp'],
-                value=d['value'],
-                open=d.get('open'),
-                high=d.get('high'),
-                low=d.get('low'),
-                turnover=d.get('turnover'),
-                transactions=d.get('transactions'),
-                shares=d.get('shares'),
-                volume=d.get('volume', 0),
-                is_minute_data=d.get('is_minute_data', False),
-            )
-            for d in data_list
-        ]
-
-        update_fields = ['value', 'open', 'high', 'low', 'turnover',
-                         'transactions', 'shares', 'volume', 'is_minute_data']
-
+        total_upserted = 0
         with transaction.atomic():
-            results = NEPSEIndex.objects.bulk_create(
-                objects,
-                update_conflicts=True,
-                unique_fields=['timestamp'],       # the conflict key
-                update_fields=update_fields,
-            )
+            for d in data_list:
+                obj, _ = NEPSEIndex.objects.update_or_create(
+                    timestamp=d['timestamp'],
+                    defaults={
+                        'value': d['value'],
+                        'open': d.get('open'),
+                        'high': d.get('high'),
+                        'low': d.get('low'),
+                        'turnover': d.get('turnover'),
+                        'transactions': d.get('transactions'),
+                        'shares': d.get('shares'),
+                        'volume': d.get('volume', 0),
+                        'is_minute_data': d.get('is_minute_data', False),
+                    }
+                )
+                total_upserted += 1
 
-        # Django doesn't reliably populate created/updated flags across all
-        # backends, so we report total rows processed instead.
-        total_upserted = len(results)
         logger.info(f"Upserted {total_upserted} NEPSE index records.")
 
         # Generate insights after successful upsert
@@ -721,7 +834,7 @@ def _scrape_historical_data(symbol, incremental=False):
             input.dispatchEvent(new Event('input'));
             AutoSuggest.getAutoSuggestDataByElement('Company', input);
         """)
-        time.sleep(4)
+        time.sleep(1.5)  # Reduced from 4s - autocomplete is fast
 
         driver.find_element(By.ID, "ctl00_lbtnSearch").click()
 
@@ -756,7 +869,7 @@ def _scrape_historical_data(symbol, incremental=False):
                 break
 
             current_page += 1
-            time.sleep(2)
+            time.sleep(1)  # Reduced from 2s
 
         return _save_price_data(symbol, all_data, incremental=incremental, last_scraped_date=last_scraped_date)
 
@@ -899,13 +1012,13 @@ def _click_next_page(driver):
     import time
 
     try:
-        btn = WebDriverWait(driver, 10).until(
+        btn = WebDriverWait(driver, 5).until(
             EC.presence_of_element_located((By.XPATH, "//a[@title='Next Page']"))
         )
         onclick_js = btn.get_attribute("onclick")
         if onclick_js:
             driver.execute_script(onclick_js)
-            time.sleep(2)
+            time.sleep(0.8)  # Reduced from 2s
             return True
     except Exception:
         return False

@@ -49,19 +49,19 @@ export const getMe = () => api.get('/auth/me/');
 // Stocks
 export const getStocks = (params) => api.get('/stocks/', { params });
 export const getKnownStocks = (search) => api.get('/stocks/known/', { params: { search } });
-export const getStockDetail = (symbol) => api.get(`/stocks/${symbol}/`);
-export const getStockHistory = (symbol, days) => api.get(`/stocks/${symbol}/history/`, { params: { days } });
-export const getStockLive = (symbol) => api.get(`/stocks/${symbol}/live/`);
+export const getStockDetail = (symbol) => api.get(`/stocks/${encodeURIComponent(symbol)}/`);
+export const getStockHistory = (symbol, days) => api.get(`/stocks/${encodeURIComponent(symbol)}/history/`, { params: { days } });
+export const getStockLive = (symbol) => api.get(`/stocks/${encodeURIComponent(symbol)}/live/`);
 export const getAllStocksWithPrices = (params) => api.get('/stocks/all/', { params });
 
 // Scraping
-export const triggerScrape = (symbol) => api.post(`/stocks/${symbol}/scrape/`);
-export const getScrapeStatus = (symbol) => api.get(`/scrape-jobs/${symbol}/status/`);
+export const triggerScrape = (symbol) => api.post(`/stocks/${encodeURIComponent(symbol)}/scrape/`);
+export const getScrapeStatus = (symbol) => api.get(`/scrape-jobs/${encodeURIComponent(symbol)}/status/`);
 
 // Watchlist
 export const getWatchlist = () => api.get('/watchlist/');
 export const addToWatchlist = (symbol) => api.post('/watchlist/', { stock_symbol: symbol });
-export const removeFromWatchlist = (symbol) => api.delete(`/watchlist/${symbol}/`);
+export const removeFromWatchlist = (symbol) => api.delete(`/watchlist/${encodeURIComponent(symbol)}/`);
 export const autoScrapeWatchlist = () => api.post('/watchlist/auto-scrape/');
 export const scrapeAllStocks = () => api.post('/scrape-all/');
 export const getBulkScrapeProgress = () => api.get('/scrape-all/progress/');
@@ -83,6 +83,7 @@ export const getAIScreeningProgress = () => api.get('/screener/auto/progress/');
 // NEPSE Index
 export const getNEPSEIndexData = (range) => api.get('/nepse-index/', { params: { range } });
 export const scrapeNEPSEIndex = () => api.post('/nepse-index/scrape/');
+export const getScrapeTaskStatus = (taskId) => api.get(`/nepse-index/scrape/status/${taskId}/`);
 export const getNEPSEInsights = (range) => api.get('/nepse-index/insights/', { params: { range } });
 export const generateNEPSEInsights = () => api.post('/nepse-index/insights/generate/');
 export const getNEPSEPredictions = () => api.get('/nepse-index/predictions/');

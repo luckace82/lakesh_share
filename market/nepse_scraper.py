@@ -69,7 +69,7 @@ def _load_page(driver):
     """Navigate to Merolagani indices page and wait for it to settle."""
     driver.get(MEROLAGANI_INDICES_URL)
     _wait_for_table(driver)
-    time.sleep(3)  # let JS render fully
+    time.sleep(1.5)  # let JS render fully (reduced from 3s)
     _dismiss_alert(driver)
 
 
@@ -249,7 +249,7 @@ def _click_next_page(driver, current_first_date):
             driver.execute_script("arguments[0].click();", btn)
 
         _dismiss_alert(driver)
-        time.sleep(3)
+        time.sleep(1.2)  # reduced from 3s
 
         # Confirm the table actually changed by checking the first date cell
         try:
@@ -311,12 +311,15 @@ def scrape_nepse_index():
             driver.quit()
 
 
-def scrape_nepse_index_historical(days=30):
+def scrape_nepse_index_historical(days=30, stop_timestamp=None):
     """
-    Scrape historical NEPSE index data from Merolagani with full pagination.
+    Scrape historical NEPSE index data from Merolagani with pagination.
 
-    The `days` parameter is advisory; actual cutoff logic should be applied
-    by the caller after this function returns all available records.
+    Pagination stops early once we have all the data we need:
+      - `stop_timestamp`: in incremental mode, stop as soon as a page contains
+        a record at or before this timestamp (all newer records are collected).
+      - `days`: cap how far back to paginate (records older than `days` ago
+        are not needed). Ignored when None or <= 0.
 
     Returns a list of record dicts (newest first, matching website order).
     """
@@ -324,6 +327,11 @@ def scrape_nepse_index_historical(days=30):
     try:
         driver = _make_driver()
         _load_page(driver)
+
+        # Compute the oldest date we care about from `days`
+        min_date = None
+        if days and days > 0:
+            min_date = (timezone.now() - timedelta(days=days)).date()
 
         all_data = []
         current_page = 1
@@ -337,6 +345,24 @@ def scrape_nepse_index_historical(days=30):
 
             if not page_data:
                 logger.warning("No data on this page, stopping pagination")
+                break
+
+            # Oldest record on this page (rows are newest-first)
+            oldest_ts = page_data[-1]['timestamp']
+
+            # Incremental: stop once we've reached data we already have
+            if stop_timestamp is not None and oldest_ts <= stop_timestamp:
+                logger.info(
+                    f"Reached cutoff {stop_timestamp} on page {current_page}; "
+                    "stopping early (incremental)."
+                )
+                break
+
+            # Range cap: stop once we've gone past the requested window
+            if min_date is not None and oldest_ts.date() <= min_date:
+                logger.info(
+                    f"Reached {days}-day window on page {current_page}; stopping."
+                )
                 break
 
             if not _click_next_page(driver, first_date):

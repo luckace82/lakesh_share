@@ -1,20 +1,17 @@
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { 
-  LayoutDashboard, 
-  Briefcase, 
-  Star, 
-  Search, 
-  FileText, 
-  TrendingUp, 
-  BookOpen, 
-  Layers,
-  Bell,
+import {
+  LayoutDashboard,
+  Briefcase,
+  Star,
+  Search,
   MessageSquare,
-  LogOut
+  LogOut,
+  X,
+  TrendingUp
 } from 'lucide-react';
 
-export default function Sidebar() {
+export default function Sidebar({ mobileOpen, onCloseMobile }) {
   const location = useLocation();
   const { user, logout } = useAuth();
 
@@ -24,16 +21,12 @@ export default function Sidebar() {
     { path: '/watchlist', icon: Star, label: 'Watchlist' },
     { path: '/screener', icon: Search, label: 'Screener' },
     { path: '/chat', icon: MessageSquare, label: 'AI Chat' },
-    { path: '/ipo', icon: FileText, label: 'IPO' },
-    { path: '/floorsheet', icon: Layers, label: 'Floorsheet' },
-    { path: '/market-depth', icon: TrendingUp, label: 'Market Depth' },
-    { path: '/news', icon: Bell, label: 'News & Events' },
   ];
 
   return (
-    <aside className="sidebar">
+    <aside className={`sidebar ${mobileOpen ? 'mobile-open' : ''}`}>
       {/* Logo */}
-      <div className="p-6 border-b border-[var(--color-border)]">
+      <div className="p-6 border-b border-[var(--color-border)] flex items-center justify-between">
         <Link to="/" className="flex items-center gap-3 no-underline">
           <div className="bg-[var(--color-brand)] p-2 rounded-lg">
             <TrendingUp className="h-5 w-5 text-white" />
@@ -43,6 +36,9 @@ export default function Sidebar() {
             <span className="text-[var(--color-brand)] font-bold ml-1">NEPSE</span>
           </div>
         </Link>
+        <button onClick={onCloseMobile} className="md:hidden text-[var(--color-secondary-text)] hover:text-[var(--color-primary-text)] bg-transparent border-0 p-1">
+          <X className="h-5 w-5" />
+        </button>
       </div>
 
       {/* Navigation */}
@@ -55,8 +51,9 @@ export default function Sidebar() {
             
             return (
               <li key={item.path}>
-                <Link 
+                <Link
                   to={item.path}
+                  onClick={onCloseMobile}
                   className={`sidebar-item ${isActive ? 'active' : ''}`}
                 >
                   <Icon className="h-5 w-5" />

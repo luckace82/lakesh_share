@@ -52,6 +52,7 @@ urlpatterns = [
     # NEPSE Index
     path('nepse-index/', views.nepse_index_data, name='nepse-index-data'),
     path('nepse-index/scrape/', views.scrape_nepse_index, name='scrape-nepse-index'),
+    path('nepse-index/scrape/status/<str:task_id>/', views.scrape_task_status, name='scrape-task-status'),
     path('nepse-index/insights/', views.nepse_insights, name='nepse_insights'),
     path('nepse-index/insights/generate/', views.generate_nepse_insights, name='generate_nepse_insights'),
     path('nepse-index/predictions/', views.nepse_predictions, name='nepse_predictions'),
