@@ -199,7 +199,7 @@ export default function PortfolioPage() {
     setLoadingInsights(true);
     try {
       const res = await analyzePortfolio();
-      setAiInsights(res.data.insights);
+      setAiInsights(res.data.analysis || res.data.insights);
     } catch (error) {
       console.error('Error generating insights:', error);
       setAiInsights('Failed to generate insights. Please try again.');

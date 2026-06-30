@@ -32,8 +32,8 @@ export default function Sidebar({ mobileOpen, onCloseMobile }) {
             <TrendingUp className="h-5 w-5 text-white" />
           </div>
           <div>
-            <span className="text-lg font-bold text-[var(--color-primary-text)]">Ontreat</span>
-            <span className="text-[var(--color-brand)] font-bold ml-1">NEPSE</span>
+            <span className="text-lg font-bold text-[var(--color-primary-text)]">Dhan</span>
+            <span className="text-[var(--color-brand)] font-bold ml-1">Labh</span>
           </div>
         </Link>
         <button onClick={onCloseMobile} className="md:hidden text-[var(--color-secondary-text)] hover:text-[var(--color-primary-text)] bg-transparent border-0 p-1">

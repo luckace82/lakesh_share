@@ -1,18 +1,15 @@
 """NEPSE Index scraper for fetching index data from Merolagani"""
 
-from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from webdriver_manager.chrome import ChromeDriverManager
 from django.utils import timezone
 from decimal import Decimal
 import logging
 import re
 import time
 from datetime import datetime, timedelta
+from .browser_pool import get_pool, _create_driver
 
 logger = logging.getLogger(__name__)
 
@@ -24,21 +21,8 @@ MEROLAGANI_INDICES_URL = "https://merolagani.com/Indices.aspx"
 # ---------------------------------------------------------------------------
 
 def _make_driver():
-    """Create and return a configured headless Chrome driver."""
-    chrome_options = Options()
-    chrome_options.add_argument("--headless")
-    chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--disable-dev-shm-usage")
-    chrome_options.add_argument("--disable-gpu")
-    chrome_options.add_argument("--disable-notifications")
-    chrome_options.add_experimental_option(
-        "prefs", {"profile.default_content_setting_values.notifications": 2}
-    )
-    driver = webdriver.Chrome(
-        service=Service(ChromeDriverManager().install()),
-        options=chrome_options,
-    )
-    return driver
+    """Create and return a configured headless Chrome driver (delegates to browser_pool)."""
+    return _create_driver()
 
 
 def _dismiss_alert(driver):
@@ -48,7 +32,7 @@ def _dismiss_alert(driver):
         text = alert.text
         alert.dismiss()
         logger.info(f"Dismissed alert: {text}")
-        time.sleep(0.5)
+        time.sleep(0.1)
         return True
     except Exception:
         return False
@@ -69,7 +53,13 @@ def _load_page(driver):
     """Navigate to Merolagani indices page and wait for it to settle."""
     driver.get(MEROLAGANI_INDICES_URL)
     _wait_for_table(driver)
-    time.sleep(1.5)  # let JS render fully (reduced from 3s)
+    # Wait for tbody rows to appear (JS-rendered table)
+    try:
+        WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, "table tbody tr"))
+        )
+    except Exception:
+        time.sleep(0.5)  # fallback
     _dismiss_alert(driver)
 
 
@@ -249,26 +239,36 @@ def _click_next_page(driver, current_first_date):
             driver.execute_script("arguments[0].click();", btn)
 
         _dismiss_alert(driver)
-        time.sleep(1.2)  # reduced from 3s
 
-        # Confirm the table actually changed by checking the first date cell
+        # Wait for the first date cell to change (max 5s) instead of fixed sleep
+        page_changed = False
         try:
-            first_cell = driver.find_element(
-                By.CSS_SELECTOR, "table tbody tr:first-child td:nth-child(2)"
+            WebDriverWait(driver, 5).until(
+                lambda d: d.find_element(
+                    By.CSS_SELECTOR, "table tbody tr:first-child td:nth-child(2)"
+                ).text.strip() != current_first_date
             )
-            new_first_date = first_cell.text.strip()
+            page_changed = True
         except Exception:
-            logger.warning("Could not read first cell after click")
-            return False
+            pass  # Table might not have changed
 
-        if new_first_date == current_first_date:
-            logger.warning(
-                f"First date unchanged ({current_first_date}) — pagination stopped"
-            )
-            return False
+        if not page_changed:
+            # Read the cell to double-check
+            try:
+                new_first_date = driver.find_element(
+                    By.CSS_SELECTOR, "table tbody tr:first-child td:nth-child(2)"
+                ).text.strip()
+            except Exception:
+                new_first_date = "?"
+            if new_first_date == current_first_date:
+                logger.warning(
+                    f"First date unchanged ({current_first_date}) — pagination stopped"
+                )
+                return False
 
         logger.info(
-            f"Page changed: first date {current_first_date!r} → {new_first_date!r}"
+            f"Page changed: first date {current_first_date!r} → "
+            f"{driver.find_element(By.CSS_SELECTOR, 'table tbody tr:first-child td:nth-child(2)').text.strip()!r}"
         )
 
         # Wait for table to settle after page change

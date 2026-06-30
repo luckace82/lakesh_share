@@ -432,7 +432,7 @@ export default function Dashboard() {
                 {scrapedStocksList.map(stock => (
                   <Link
                     key={stock.id}
-                    to={`/stock/${stock.symbol}`}
+                    to={`/stocks/${stock.symbol}`}
                     onClick={() => setShowScrapedStocksModal(false)}
                     className="p-2 rounded bg-[var(--color-sidebar-bg)] hover:bg-[var(--color-border)] transition-colors text-center"
                   >

@@ -56,7 +56,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   const Icon(Icons.show_chart, size: 56, color: AppTheme.brand),
                   const SizedBox(height: 12),
                   Text(
-                    'Lakesh Share',
+                    'DhanLabh',
                     textAlign: TextAlign.center,
                     style: Theme.of(context).textTheme.headlineMedium?.copyWith(
                           color: AppTheme.primaryText,

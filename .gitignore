@@ -9,3 +9,4 @@ venv/
 
 # Ignore compiled migration files only
 **/migrations/*.pyc
+.aider*

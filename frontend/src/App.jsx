@@ -46,7 +46,7 @@ function AppRoutes() {
               >
                 <Menu className="h-5 w-5" />
               </button>
-              <span className="font-bold text-[var(--color-primary-text)]">Ontreat NEPSE</span>
+              <span className="font-bold text-[var(--color-primary-text)]">DhanLabh</span>
             </div>
             <Routes>
               <Route path="/dashboard" element={<Dashboard />} />

@@ -172,3 +172,23 @@ CELERY_ACCEPT_CONTENT = ['json']
 CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
 CELERY_TIMEZONE = 'Asia/Kathmandu'
+CELERY_WORKER_CONCURRENCY = config('CELERY_WORKER_CONCURRENCY', default=4)
+CELERY_WORKER_PREFETCH_MULTIPLIER = 1
+CELERY_TASK_DEFAULT_QUEUE = 'default'
+CELERY_TASK_QUEUES = {
+    'default': {},
+    'scraping': {},
+    'indicators': {},
+    'ai': {},
+}
+CELERY_TASK_ROUTES = {
+    'market.scraper_tasks.scrape_single_stock_task': {'queue': 'scraping'},
+    'market.scraper_tasks.scrape_all_stocks_task': {'queue': 'scraping'},
+    'market.scraper_tasks.run_scrape_task': {'queue': 'scraping'},
+    'market.scraper_tasks.scrape_nepse_index_task': {'queue': 'scraping'},
+    'market.scraper_tasks.auto_scrape_nepse_index': {'queue': 'scraping'},
+    'market.scraper_tasks.update_stock_indicators': {'queue': 'indicators'},
+    'market.scraper_tasks.generate_nepse_insights': {'queue': 'ai'},
+    'market.scraper_tasks.generate_daily_insights': {'queue': 'ai'},
+    'market.scraper_tasks.ai_screener_task': {'queue': 'ai'},
+}

@@ -318,66 +318,100 @@ def scrape_all_stocks_task(self, parallel=True, batch_size=5):
     )
 
     if parallel:
-        # Dispatch parallel tasks in batches
+        # Dispatch parallel tasks in controlled batches to avoid
+        # overwhelming the system with too many Chrome instances.
         symbols = [s['symbol'] for s in NEPSE_STOCKS]
-        
-        # Create tasks for all stocks
-        tasks = [
-            scrape_single_stock_task.s(symbol, bulk_job.id, True)
-            for symbol in symbols
+
+        # Split symbols into batches of batch_size
+        batches = [
+            symbols[i:i + batch_size]
+            for i in range(0, len(symbols), batch_size)
         ]
-        
-        # Execute in batches to avoid overwhelming the system
-        # Using group for parallel execution
-        job_group = group(tasks)
-        result = job_group.apply_async()
-        
-        # Store task group ID for tracking
-        bulk_job.error = f"task_group_id:{result.id}"
+
+        logger.info(
+            f"Parallel bulk scrape: {total_stocks} stocks in {len(batches)} "
+            f"batches of {batch_size}"
+        )
+
+        # Build a chord: each batch is a group, batches run sequentially via chain
+        from celery import chain as celery_chain
+
+        batch_tasks = []
+        for batch in batches:
+            batch_group = group(
+                scrape_single_stock_task.s(symbol, bulk_job.id, True)
+                for symbol in batch
+            )
+            batch_tasks.append(batch_group)
+
+        # Chain all batches: batch1 → batch2 → ... (each batch's tasks run in parallel,
+        # but batches run sequentially to bound concurrency)
+        workflow = celery_chain(*batch_tasks)
+        result = workflow.apply_async()
+
+        # Store task ID for tracking
+        bulk_job.error = f"task_chain_id:{result.id}"
         bulk_job.save()
-        
+
         return {
             'bulk_job_id': bulk_job.id,
             'total': total_stocks,
             'mode': 'parallel',
-            'task_group_id': result.id
+            'batches': len(batches),
+            'batch_size': batch_size,
+            'task_chain_id': result.id
         }
     
     else:
-        # Sequential mode (original behavior, but with browser reuse)
+        # Sequential mode — create ONE driver and reuse it for all stocks
+        from .browser_pool import _create_driver, shutdown_pool
+        import time as _time
+
         scraped_count = 0
         failed_count = 0
+        shared_driver = None
 
-        for stock_data in NEPSE_STOCKS:
-            try:
-                symbol = stock_data['symbol']
-                name = stock_data.get('name', symbol)[:20]
-                stock, _ = Stock.objects.get_or_create(symbol=symbol, defaults={'name': name})
+        try:
+            shared_driver = _create_driver()
+            logger.info(f"Sequential bulk scrape: created single reusable driver for {total_stocks} stocks")
 
-                bulk_job.current_symbol = symbol
-                bulk_job.save()
+            for stock_data in NEPSE_STOCKS:
+                try:
+                    symbol = stock_data['symbol']
+                    name = stock_data.get('name', symbol)[:20]
+                    stock, _ = Stock.objects.get_or_create(symbol=symbol, defaults={'name': name})
 
-                running = ScrapeJob.objects.filter(stock=stock, status__in=['pending', 'running']).exists()
-                if running:
+                    bulk_job.current_symbol = symbol
+                    bulk_job.save()
+
+                    running = ScrapeJob.objects.filter(stock=stock, status__in=['pending', 'running']).exists()
+                    if running:
+                        continue
+
+                    job = ScrapeJob.objects.create(
+                        user=admin_user,
+                        stock=stock,
+                        status='pending'
+                    )
+
+                    _execute_scrape(job.id, incremental=True, driver=shared_driver)
+                    scraped_count += 1
+                    bulk_job.scraped_stocks = scraped_count
+                    bulk_job.save()
+
+                except Exception as e:
+                    logger.error(f"Error scraping {stock_data}: {e}")
+                    failed_count += 1
+                    bulk_job.failed_stocks = failed_count
+                    bulk_job.save()
                     continue
-
-                job = ScrapeJob.objects.create(
-                    user=admin_user,
-                    stock=stock,
-                    status='pending'
-                )
-
-                _execute_scrape(job.id, incremental=True)
-                scraped_count += 1
-                bulk_job.scraped_stocks = scraped_count
-                bulk_job.save()
-
-            except Exception as e:
-                logger.error(f"Error scraping {stock_data}: {e}")
-                failed_count += 1
-                bulk_job.failed_stocks = failed_count
-                bulk_job.save()
-                continue
+        finally:
+            if shared_driver:
+                try:
+                    shared_driver.quit()
+                except Exception:
+                    pass
+            shutdown_pool()
 
         bulk_job.status = 'completed'
         bulk_job.completed_at = timezone.now()
@@ -463,26 +497,37 @@ def scrape_nepse_index_task(self, historical_days=None, force_all=False):
             return {'success': True, 'created': 0, 'updated': 0, 'total': 0}
 
         # ------------------------------------------------------------------ #
-        # 4.  Upsert via update_or_create (safe without DB unique constraint)
+        # 4.  Bulk upsert via bulk_create(update_conflicts=True)
         # ------------------------------------------------------------------ #
-        total_upserted = 0
+        records_to_create = [
+            NEPSEIndex(
+                timestamp=d['timestamp'],
+                value=d['value'],
+                open=d.get('open'),
+                high=d.get('high'),
+                low=d.get('low'),
+                turnover=d.get('turnover'),
+                transactions=d.get('transactions'),
+                shares=d.get('shares'),
+                volume=d.get('volume', 0),
+                is_minute_data=d.get('is_minute_data', False),
+            )
+            for d in data_list
+        ]
+
         with transaction.atomic():
-            for d in data_list:
-                obj, _ = NEPSEIndex.objects.update_or_create(
-                    timestamp=d['timestamp'],
-                    defaults={
-                        'value': d['value'],
-                        'open': d.get('open'),
-                        'high': d.get('high'),
-                        'low': d.get('low'),
-                        'turnover': d.get('turnover'),
-                        'transactions': d.get('transactions'),
-                        'shares': d.get('shares'),
-                        'volume': d.get('volume', 0),
-                        'is_minute_data': d.get('is_minute_data', False),
-                    }
-                )
-                total_upserted += 1
+            NEPSEIndex.objects.bulk_create(
+                records_to_create,
+                update_conflicts=True,
+                unique_fields=['timestamp'],
+                update_fields=[
+                    'value', 'open', 'high', 'low',
+                    'turnover', 'transactions', 'shares',
+                    'volume', 'is_minute_data',
+                ],
+            )
+
+        total_upserted = len(records_to_create)
 
         logger.info(f"Upserted {total_upserted} NEPSE index records.")
 
@@ -742,8 +787,11 @@ def _calculate_rsi(closes, period=14):
     return 100 - (100 / (1 + rs))
 
 
-def _execute_scrape(job_id, incremental=False):
-    """Execute the actual scraping work"""
+def _execute_scrape(job_id, incremental=False, driver=None):
+    """Execute the actual scraping work.
+
+    If `driver` is provided, it is reused across multiple stock scrapes.
+    """
     from .models import ScrapeJob
 
     try:
@@ -754,7 +802,7 @@ def _execute_scrape(job_id, incremental=False):
         symbol = job.stock.symbol
         logger.info(f"Starting scrape for {symbol} (incremental={incremental})")
 
-        saved = _scrape_historical_data(symbol, incremental=incremental)
+        saved = _scrape_historical_data(symbol, incremental=incremental, driver=driver)
 
         job.status = 'completed'
         job.records_saved = saved
@@ -783,19 +831,20 @@ def _execute_scrape(job_id, incremental=False):
             pass
 
 
-def _scrape_historical_data(symbol, incremental=False):
-    """Scrape historical price data using Selenium"""
-    from selenium import webdriver
+def _scrape_historical_data(symbol, incremental=False, driver=None):
+    """Scrape historical price data using Selenium.
+
+    If `driver` is provided, it is reused (caller manages its lifecycle).
+    If not, a driver is checked out from the BrowserPool and returned after.
+    """
     from selenium.webdriver.common.by import By
-    from selenium.webdriver.chrome.options import Options
-    from selenium.webdriver.chrome.service import Service
     from selenium.webdriver.support.ui import WebDriverWait
     from selenium.webdriver.support import expected_conditions as EC
-    from webdriver_manager.chrome import ChromeDriverManager
     from bs4 import BeautifulSoup
     import time
 
     from .models import DailyPrice
+    from .browser_pool import get_pool
 
     last_scraped_date = None
     max_pages = 60
@@ -810,17 +859,12 @@ def _scrape_historical_data(symbol, incremental=False):
             logger.warning(f"Could not get last scraped date for {symbol}, falling back to full scrape")
             max_pages = 60
 
-    chrome_options = Options()
-    chrome_options.add_argument("--headless=new")
-    chrome_options.add_argument("--disable-notifications")
-    chrome_options.add_argument("--window-size=1920,1080")
-    chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--disable-dev-shm-usage")
-
-    driver = webdriver.Chrome(
-        service=Service(ChromeDriverManager().install()),
-        options=chrome_options
-    )
+    owns_driver = driver is None
+    pool = None
+    if owns_driver:
+        pool = get_pool()
+        ctx = pool.get_driver()
+        driver = ctx.__enter__()
 
     try:
         driver.get("https://merolagani.com")
@@ -834,7 +878,13 @@ def _scrape_historical_data(symbol, incremental=False):
             input.dispatchEvent(new Event('input'));
             AutoSuggest.getAutoSuggestDataByElement('Company', input);
         """)
-        time.sleep(1.5)  # Reduced from 4s - autocomplete is fast
+        # Wait for autocomplete dropdown to appear (or fall back to short sleep)
+        try:
+            WebDriverWait(driver, 2).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "div.autocomplete div, .ui-autocomplete li"))
+            )
+        except Exception:
+            time.sleep(0.5)  # fallback if dropdown selector doesn't match
 
         driver.find_element(By.ID, "ctl00_lbtnSearch").click()
 
@@ -869,12 +919,12 @@ def _scrape_historical_data(symbol, incremental=False):
                 break
 
             current_page += 1
-            time.sleep(1)  # Reduced from 2s
 
         return _save_price_data(symbol, all_data, incremental=incremental, last_scraped_date=last_scraped_date)
 
     finally:
-        driver.quit()
+        if owns_driver and pool is not None:
+            ctx.__exit__(None, None, None)
 
 
 def _scrape_page(driver):
@@ -910,7 +960,7 @@ def _scrape_page(driver):
 
 
 def _save_price_data(symbol, data, incremental=False, last_scraped_date=None):
-    """Save scraped price data to database"""
+    """Save scraped price data to database using bulk upsert."""
     from .models import Stock, DailyPrice, LivePrice
 
     if not data:
@@ -918,53 +968,62 @@ def _save_price_data(symbol, data, incremental=False, last_scraped_date=None):
 
     stock, _ = Stock.objects.get_or_create(symbol=symbol, defaults={'name': symbol})
 
-    saved = 0
     latest_record = None
     latest_date = None
+    records_to_create = []
+
+    for record in data:
+        try:
+            date_obj = datetime.strptime(record['date'], '%Y/%m/%d').date()
+
+            if incremental and last_scraped_date and date_obj <= last_scraped_date:
+                continue
+
+            open_price  = _clean_decimal(record['open'])
+            high_price  = _clean_decimal(record['high'])
+            low_price   = _clean_decimal(record['low'])
+            close_price = _clean_decimal(record['close'])
+            volume      = _clean_int(record['quantity'])
+
+            if not close_price:
+                continue
+
+            records_to_create.append(DailyPrice(
+                stock=stock,
+                date=date_obj,
+                open=open_price or close_price,
+                high=high_price or close_price,
+                low=low_price or close_price,
+                close=close_price,
+                volume=volume or 0,
+            ))
+
+            if latest_date is None or date_obj > latest_date:
+                latest_date = date_obj
+                latest_record = {
+                    'close':  close_price,
+                    'open':   open_price  or close_price,
+                    'high':   high_price  or close_price,
+                    'low':    low_price   or close_price,
+                    'volume': volume or 0,
+                }
+
+        except Exception as e:
+            logger.warning(f"Error parsing record: {e}")
+            continue
+
+    if not records_to_create:
+        return 0
 
     with transaction.atomic():
-        for record in data:
-            try:
-                date_obj = datetime.strptime(record['date'], '%Y/%m/%d').date()
+        DailyPrice.objects.bulk_create(
+            records_to_create,
+            update_conflicts=True,
+            unique_fields=['stock', 'date'],
+            update_fields=['open', 'high', 'low', 'close', 'volume'],
+        )
 
-                if incremental and last_scraped_date and date_obj <= last_scraped_date:
-                    continue
-
-                open_price  = _clean_decimal(record['open'])
-                high_price  = _clean_decimal(record['high'])
-                low_price   = _clean_decimal(record['low'])
-                close_price = _clean_decimal(record['close'])
-                volume      = _clean_int(record['quantity'])
-
-                if not close_price:
-                    continue
-
-                DailyPrice.objects.update_or_create(
-                    stock=stock,
-                    date=date_obj,
-                    defaults={
-                        'open':   open_price  or close_price,
-                        'high':   high_price  or close_price,
-                        'low':    low_price   or close_price,
-                        'close':  close_price,
-                        'volume': volume or 0,
-                    }
-                )
-                saved += 1
-
-                if latest_date is None or date_obj > latest_date:
-                    latest_date = date_obj
-                    latest_record = {
-                        'close':  close_price,
-                        'open':   open_price  or close_price,
-                        'high':   high_price  or close_price,
-                        'low':    low_price   or close_price,
-                        'volume': volume or 0,
-                    }
-
-            except Exception as e:
-                logger.warning(f"Error saving record: {e}")
-                continue
+    saved = len(records_to_create)
 
     if latest_record:
         try:
@@ -1005,21 +1064,39 @@ def _is_last_page(driver):
 
 
 def _click_next_page(driver):
-    """Navigate to next page"""
+    """Navigate to next page — waits for table content to refresh instead of fixed sleep."""
     from selenium.webdriver.common.by import By
     from selenium.webdriver.support.ui import WebDriverWait
     from selenium.webdriver.support import expected_conditions as EC
-    import time
 
     try:
+        # Capture the first data row's text before clicking
+        try:
+            old_first_row = driver.find_element(
+                By.CSS_SELECTOR, "table.table.table-bordered tbody tr:nth-child(2)"
+            ).text
+        except Exception:
+            old_first_row = None
+
         btn = WebDriverWait(driver, 5).until(
             EC.presence_of_element_located((By.XPATH, "//a[@title='Next Page']"))
         )
         onclick_js = btn.get_attribute("onclick")
         if onclick_js:
             driver.execute_script(onclick_js)
-            time.sleep(0.8)  # Reduced from 2s
-            return True
+        else:
+            return False
+
+        # Wait for the table content to change (max 5s)
+        try:
+            WebDriverWait(driver, 5).until(
+                lambda d: d.find_element(
+                    By.CSS_SELECTOR, "table.table.table-bordered tbody tr:nth-child(2)"
+                ).text != old_first_row
+            )
+        except Exception:
+            pass  # Table might not have changed (last page)
+        return True
     except Exception:
         return False
 
@@ -1050,50 +1127,12 @@ def auto_scrape_nepse_index(self):
     """
     Automatically scrape NEPSE index data daily.
     This task is scheduled to run at 4:30 PM daily.
+    Delegates to scrape_nepse_index_task which handles the actual scraping.
     """
-    from .nepse_scraper import scrape_nepse_index
-    from .models import NEPSEIndex
-    from django.utils import timezone
-    import logging
-    
-    logger = logging.getLogger(__name__)
-    
     try:
-        # Get today's date
-        today = timezone.now().date()
-        
-        # Check if we already have data for today
-        existing_today = NEPSEIndex.objects.filter(date=today).exists()
-        if existing_today:
-            logger.info(f"NEPSE index data already exists for {today}, skipping scrape")
-            return {'status': 'skipped', 'reason': 'Data already exists for today'}
-        
-        # Scrape current NEPSE index
-        index_data = scrape_nepse_index()
-        
-        if index_data:
-            # Save to database
-            nepse_index = NEPSEIndex(
-                date=today,
-                value=index_data['value'],
-                change=index_data.get('change', 0),
-                change_percent=index_data.get('change_percent', 0),
-                timestamp=index_data['timestamp']
-            )
-            nepse_index.save()
-            
-            logger.info(f"Auto-scraped NEPSE index: {index_data['value']} for {today}")
-            return {
-                'status': 'success',
-                'value': index_data['value'],
-                'date': str(today),
-                'change': index_data.get('change', 0),
-                'change_percent': index_data.get('change_percent', 0)
-            }
-        else:
-            logger.error("Failed to scrape NEPSE index data")
-            return {'status': 'failed', 'reason': 'Scraper returned no data'}
-            
+        result = scrape_nepse_index_task.delay()
+        logger.info(f"Triggered NEPSE index scrape task: {result.id}")
+        return {'status': 'success', 'task_id': result.id}
     except Exception as e:
         logger.error(f"Auto NEPSE index scraping failed: {e}")
         return {'status': 'failed', 'reason': str(e)}
@@ -1177,26 +1216,12 @@ def generate_daily_insights(self):
     """
     Generate daily market insights and analysis.
     This task runs at 5:15 PM daily.
+    Delegates to the generate_nepse_insights Celery task.
     """
-    from .models import NEPSEIndex, NEPSEInsight, Stock
-    from django.utils import timezone
-    import logging
-    
-    logger = logging.getLogger(__name__)
-    
     try:
-        # Get recent NEPSE index data
-        recent_data = NEPSEIndex.objects.order_by('-date')[:30]
-        if len(recent_data) < 7:
-            return {'status': 'skipped', 'reason': 'Insufficient data for analysis'}
-        
-        # Generate insights using existing function
-        from .views import generate_nepse_insights
-        insights = generate_nepse_insights(None)
-        
-        logger.info("Generated daily NEPSE insights")
-        return {'status': 'success', 'insights_generated': len(insights.data) if hasattr(insights, 'data') else 0}
-        
+        result = generate_nepse_insights.apply_async(args=[False], queue='ai')
+        logger.info(f"Triggered daily NEPSE insights generation: {result.id}")
+        return {'status': 'success', 'task_id': result.id}
     except Exception as e:
         logger.error(f"Daily insights generation failed: {e}")
         return {'status': 'failed', 'reason': str(e)}

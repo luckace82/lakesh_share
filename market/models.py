@@ -185,7 +185,7 @@ class BulkScrapeJob(models.Model):
 
 class NEPSEIndex(models.Model):
     """NEPSE index data with minute-level and daily data"""
-    timestamp = models.DateTimeField()
+    timestamp = models.DateTimeField(unique=True)
     value = models.DecimalField(max_digits=10, decimal_places=2)
     open = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     high = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)

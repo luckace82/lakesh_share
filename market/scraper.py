@@ -28,7 +28,6 @@ class ShareSansarScraper:
         
         try:
             print("Fetching live data from ShareSansar...")
-            time.sleep(1)
             response = self.session.get(url, timeout=15, verify=False)
             
             if response.status_code != 200:

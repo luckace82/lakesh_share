@@ -53,7 +53,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('Lakesh Share', style: TextStyle(fontWeight: FontWeight.bold)),
+            const Text('DhanLabh', style: TextStyle(fontWeight: FontWeight.bold)),
             if (user != null)
               Text('Welcome, ${user['username']}',
                   style: const TextStyle(fontSize: 12, color: AppTheme.secondaryText)),

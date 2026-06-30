@@ -39,7 +39,7 @@ export default function Login() {
             <div className="bg-[var(--color-brand)] p-2 rounded-lg">
               <TrendingUp className="h-6 w-6 text-white" />
             </div>
-            <span className="text-xl font-bold text-[var(--color-primary-text)]">Ontreat <span className="text-[var(--color-brand)]">NEPSE</span></span>
+            <span className="text-xl font-bold text-[var(--color-primary-text)]">Dhan<span className="text-[var(--color-brand)]">Labh</span></span>
           </div>
           <h2 className="text-[22px] font-bold text-[var(--color-primary-text)]">Welcome Back</h2>
           <p className="text-[var(--color-secondary-text)] mt-2">Sign in to your account to continue</p>

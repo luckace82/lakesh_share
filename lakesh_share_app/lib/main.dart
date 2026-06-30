@@ -9,17 +9,17 @@ import 'router.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await dotenv.load(fileName: '.env');
-  runApp(const LakeshShareApp());
+  runApp(const DhanLabhApp());
 }
 
-class LakeshShareApp extends StatefulWidget {
-  const LakeshShareApp({super.key});
+class DhanLabhApp extends StatefulWidget {
+  const DhanLabhApp({super.key});
 
   @override
-  State<LakeshShareApp> createState() => _LakeshShareAppState();
+  State<DhanLabhApp> createState() => _DhanLabhAppState();
 }
 
-class _LakeshShareAppState extends State<LakeshShareApp> {
+class _DhanLabhAppState extends State<DhanLabhApp> {
   final _auth = AuthService();
   bool _ready = false;
 
@@ -47,7 +47,7 @@ class _LakeshShareAppState extends State<LakeshShareApp> {
         builder: (context) {
           final router = buildRouter(_auth);
           return MaterialApp.router(
-            title: 'Lakesh Share',
+            title: 'DhanLabh',
             debugShowCheckedModeBanner: false,
             theme: AppTheme.dark,
             routerConfig: router,
